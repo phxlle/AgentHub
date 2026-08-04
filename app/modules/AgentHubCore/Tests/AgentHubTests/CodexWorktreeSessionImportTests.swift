@@ -16,7 +16,7 @@ struct CodexWorktreeSessionImportTests {
 
     let service = CodexSessionMonitorService(codexDataPath: root.path)
     await service.registerWorktree(
-      WorktreeBranch(name: "feature/import", path: worktreePath, isWorktree: true),
+      WorktreeBranch(name: "feature/current", path: worktreePath, isWorktree: true),
       parentRepositoryPath: parentPath
     )
 
@@ -34,9 +34,40 @@ struct CodexWorktreeSessionImportTests {
     )
 
     #expect(page.sessions.map(\.id) == ["session-4", "session-3", "session-2"])
+    #expect(page.sessions.allSatisfy { $0.branchName == "feature/current" })
     let allFromWorktree = page.sessions.allSatisfy(\.isWorktree)
     #expect(allFromWorktree)
     #expect(page.hasMore)
+  }
+
+  @Test("Refresh uses current Codex worktree branch instead of session metadata")
+  func refreshUsesCurrentCodexWorktreeBranch() async throws {
+    let root = try temporaryDirectory(name: "codex_current_branch")
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let parentPath = root.appending(path: "Project").path
+    let worktreePath = root.appending(path: "Project-feature").path
+    try FileManager.default.createDirectory(atPath: worktreePath, withIntermediateDirectories: true)
+
+    let service = CodexSessionMonitorService(codexDataPath: root.path)
+    await service.registerWorktree(
+      WorktreeBranch(name: "feature/current", path: worktreePath, isWorktree: true),
+      parentRepositoryPath: parentPath
+    )
+    try writeCodexSession(
+      root: root,
+      id: "session-current",
+      cwd: worktreePath,
+      timestamp: "2026-05-05T12:01:00.000Z"
+    )
+    await service.setFocusedSessionIds(["session-current"])
+
+    await service.refreshSessions(skipWorktreeRedetection: true)
+
+    let session = try #require(
+      await service.getSelectedRepositories().flatMap(\.worktrees).flatMap(\.sessions).first
+    )
+    #expect(session.branchName == "feature/current")
   }
 }
 
