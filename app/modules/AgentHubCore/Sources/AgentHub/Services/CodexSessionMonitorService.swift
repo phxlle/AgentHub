@@ -17,7 +17,9 @@ public actor CodexSessionMonitorService {
 
   // MARK: - Publishers
 
-  private nonisolated(unsafe) let repositoriesSubject = CurrentValueSubject<[SelectedRepository], Never>([])
+  private nonisolated(unsafe) let repositoriesSubject = CurrentValueSubject<
+    [SelectedRepository], Never
+  >([])
   public nonisolated var repositoriesPublisher: AnyPublisher<[SelectedRepository], Never> {
     repositoriesSubject.eraseToAnyPublisher()
   }
@@ -56,6 +58,29 @@ public actor CodexSessionMonitorService {
     selectedRepositories.append(repository)
     await refreshSessions(skipWorktreeRedetection: true)
     return repository
+  }
+
+  public func addRepositories(_ paths: [String]) async {
+    for path in paths {
+      await markInputWorktreeAsOwnedIfNeeded(path)
+    }
+    let normalizedPaths = await normalizedRepositoryPaths(paths)
+    let newPaths = normalizedPaths.filter { path in
+      !selectedRepositories.contains(where: { $0.path == path })
+    }
+    guard !newPaths.isEmpty else { return }
+
+    let allWorktrees = await detectWorktreesBatch(repoPaths: newPaths)
+    for path in newPaths {
+      selectedRepositories.append(
+        SelectedRepository(
+          path: path,
+          worktrees: allWorktrees[path] ?? [],
+          isExpanded: true
+        ))
+    }
+
+    await refreshSessions(skipWorktreeRedetection: true)
   }
 
   public func restoreRepositoriesSkeleton(_ paths: [String]) async -> [SelectedRepository] {
@@ -124,11 +149,12 @@ public actor CodexSessionMonitorService {
     if !worktrees.contains(where: { $0.path == normalizedWorktree.path }) {
       worktrees.append(normalizedWorktree)
     }
-    selectedRepositories.append(SelectedRepository(
-      path: repositoryPath,
-      worktrees: worktrees,
-      isExpanded: true
-    ))
+    selectedRepositories.append(
+      SelectedRepository(
+        path: repositoryPath,
+        worktrees: worktrees,
+        isExpanded: true
+      ))
     repositoriesSubject.send(selectedRepositories)
   }
 
@@ -144,9 +170,10 @@ public actor CodexSessionMonitorService {
   private func normalizedRepositoryPath(for path: String) async -> String {
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
     guard let info = await GitWorktreeDetector.detectWorktreeInfo(for: normalizedPath),
-          info.isWorktree,
-          let mainRepoPath = info.mainRepoPath,
-          !mainRepoPath.isEmpty else {
+      info.isWorktree,
+      let mainRepoPath = info.mainRepoPath,
+      !mainRepoPath.isEmpty
+    else {
       return normalizedPath
     }
     return WorktreeModuleResolver.normalizedDirectoryPath(mainRepoPath)
@@ -155,7 +182,8 @@ public actor CodexSessionMonitorService {
   private func markInputWorktreeAsOwnedIfNeeded(_ path: String) async {
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
     guard let info = await GitWorktreeDetector.detectWorktreeInfo(for: normalizedPath),
-          info.isWorktree else {
+      info.isWorktree
+    else {
       return
     }
     ownedWorktreePaths.insert(normalizedPath)
@@ -175,7 +203,9 @@ public actor CodexSessionMonitorService {
   }
 
   private func upsertWorktree(_ worktree: WorktreeBranch, inRepositoryAt index: Int) {
-    if let worktreeIndex = selectedRepositories[index].worktrees.firstIndex(where: { $0.path == worktree.path }) {
+    if let worktreeIndex = selectedRepositories[index].worktrees.firstIndex(where: {
+      $0.path == worktree.path
+    }) {
       let existing = selectedRepositories[index].worktrees[worktreeIndex]
       selectedRepositories[index].worktrees[worktreeIndex] = WorktreeBranch(
         name: worktree.name,
@@ -194,17 +224,20 @@ public actor CodexSessionMonitorService {
     let files = CodexSessionFileScanner.listSessionFiles(codexDataPath: codexDataPath)
     var sessions: [CLISession] = []
 
-    for path in files where ids.contains(where: { sessionId in
+    for path in files
+    where ids.contains(where: { sessionId in
       URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent.hasSuffix(sessionId)
     }) {
       guard let meta = CodexSessionFileScanner.readSessionMeta(from: path),
-            ids.contains(meta.sessionId) else {
+        ids.contains(meta.sessionId)
+      else {
         continue
       }
 
       let summary = CodexSessionJSONLParser.parseSessionSummaryFile(at: path)
       let worktree = worktreeInfo(containing: meta.projectPath)
-      let lastActivity = [summary.lastActivityAt, fileModificationDate(path)].compactMap { $0 }.max()
+      let lastActivity = [summary.lastActivityAt, fileModificationDate(path)].compactMap { $0 }
+        .max()
       let session = CLISession(
         id: meta.sessionId,
         projectPath: meta.projectPath,
@@ -239,32 +272,37 @@ public actor CodexSessionMonitorService {
 
     for path in files {
       guard let meta = CodexSessionFileScanner.readSessionMeta(from: path),
-            !excludingSessionIds.contains(meta.sessionId) else {
+        !excludingSessionIds.contains(meta.sessionId)
+      else {
         continue
       }
 
       let projectPath = WorktreeModuleResolver.normalizedDirectoryPath(meta.projectPath)
-      guard projectPath == normalizedWorktreePath || projectPath.hasPrefix(normalizedWorktreePath + "/") else {
+      guard
+        projectPath == normalizedWorktreePath || projectPath.hasPrefix(normalizedWorktreePath + "/")
+      else {
         continue
       }
 
       let summary = CodexSessionJSONLParser.parseSessionSummaryFile(at: path)
       let worktree = worktreeInfo(containing: meta.projectPath)
-      let lastActivity = [summary.lastActivityAt, meta.startedAt, fileModificationDate(path)].compactMap { $0 }.max()
+      let lastActivity = [summary.lastActivityAt, meta.startedAt, fileModificationDate(path)]
+        .compactMap { $0 }.max()
 
-      sessions.append(CLISession(
-        id: meta.sessionId,
-        projectPath: meta.projectPath,
-        branchName: meta.branch ?? worktree.branchName,
-        isWorktree: worktree.isWorktree,
-        lastActivityAt: lastActivity ?? Date(),
-        messageCount: summary.messageCount,
-        isActive: isSessionFileActive(path),
-        firstMessage: summary.firstUserMessage,
-        lastMessage: summary.lastUserMessage,
-        slug: nil,
-        sessionFilePath: path
-      ))
+      sessions.append(
+        CLISession(
+          id: meta.sessionId,
+          projectPath: meta.projectPath,
+          branchName: meta.branch ?? worktree.branchName,
+          isWorktree: worktree.isWorktree,
+          lastActivityAt: lastActivity ?? Date(),
+          messageCount: summary.messageCount,
+          isActive: isSessionFileActive(path),
+          firstMessage: summary.firstUserMessage,
+          lastMessage: summary.lastUserMessage,
+          slug: nil,
+          sessionFilePath: path
+        ))
     }
 
     sessions.sort {
@@ -299,7 +337,9 @@ public actor CodexSessionMonitorService {
 
         var merged: [WorktreeBranch] = []
         for detected in detectedWorktrees {
-          if var existing = selectedRepositories[index].worktrees.first(where: { $0.path == detected.path }) {
+          if var existing = selectedRepositories[index].worktrees.first(where: {
+            $0.path == detected.path
+          }) {
             existing.name = detected.name
             existing.sessions = []
             merged.append(existing)
@@ -323,7 +363,8 @@ public actor CodexSessionMonitorService {
 
     for repoIndex in updatedRepositories.indices {
       let orderedWorktreeIndices = updatedRepositories[repoIndex].worktrees.indices.sorted {
-        updatedRepositories[repoIndex].worktrees[$0].path.count > updatedRepositories[repoIndex].worktrees[$1].path.count
+        updatedRepositories[repoIndex].worktrees[$0].path.count
+          > updatedRepositories[repoIndex].worktrees[$1].path.count
       }
 
       for worktreeIndex in orderedWorktreeIndices {
@@ -332,7 +373,8 @@ public actor CodexSessionMonitorService {
 
         for meta in sessionMetas {
           guard !assignedSessionIds.contains(meta.sessionId) else { continue }
-          let matchesPath = meta.projectPath == worktree.path || meta.projectPath.hasPrefix(worktree.path + "/")
+          let matchesPath =
+            meta.projectPath == worktree.path || meta.projectPath.hasPrefix(worktree.path + "/")
           guard matchesPath else { continue }
 
           let entries = historyBySession[meta.sessionId] ?? []
@@ -401,18 +443,21 @@ public actor CodexSessionMonitorService {
     let historyPath = codexDataPath + "/history.jsonl"
 
     guard let data = FileManager.default.contents(atPath: historyPath),
-          let content = String(data: data, encoding: .utf8) else {
+      let content = String(data: data, encoding: .utf8)
+    else {
       return []
     }
 
     let decoder = JSONDecoder()
 
-    return content
+    return
+      content
       .components(separatedBy: .newlines)
       .compactMap { line -> CodexHistoryEntry? in
         guard !line.isEmpty,
-              let jsonData = line.data(using: .utf8),
-              let entry = try? decoder.decode(CodexHistoryEntry.self, from: jsonData) else {
+          let jsonData = line.data(using: .utf8),
+          let entry = try? decoder.decode(CodexHistoryEntry.self, from: jsonData)
+        else {
           return nil
         }
         return entry
@@ -425,19 +470,21 @@ public actor CodexSessionMonitorService {
 
     for path in files {
       guard let meta = CodexSessionFileScanner.readSessionMeta(from: path),
-            scope.includes(projectPath: meta.projectPath, sessionId: meta.sessionId) else {
+        scope.includes(projectPath: meta.projectPath, sessionId: meta.sessionId)
+      else {
         continue
       }
 
       let lastActivity = fileModificationDate(path)
 
-      results.append(CodexSessionInfo(
-        sessionId: meta.sessionId,
-        projectPath: meta.projectPath,
-        branch: meta.branch,
-        sessionFilePath: meta.sessionFilePath,
-        lastActivityAt: lastActivity
-      ))
+      results.append(
+        CodexSessionInfo(
+          sessionId: meta.sessionId,
+          projectPath: meta.projectPath,
+          branch: meta.branch,
+          sessionFilePath: meta.sessionFilePath,
+          lastActivityAt: lastActivity
+        ))
     }
 
     return results
@@ -450,14 +497,18 @@ public actor CodexSessionMonitorService {
 
   private func fileModificationDate(_ path: String) -> Date? {
     guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-          let modDate = attrs[.modificationDate] as? Date else {
+      let modDate = attrs[.modificationDate] as? Date
+    else {
       return nil
     }
     return modDate
   }
 
-  private func worktreeInfo(containing projectPath: String) -> (branchName: String?, isWorktree: Bool) {
-    let matchingWorktree = selectedRepositories
+  private func worktreeInfo(containing projectPath: String) -> (
+    branchName: String?, isWorktree: Bool
+  ) {
+    let matchingWorktree =
+      selectedRepositories
       .flatMap(\.worktrees)
       .filter { projectPath == $0.path || projectPath.hasPrefix($0.path + "/") }
       .max { $0.path.count < $1.path.count }
@@ -530,7 +581,8 @@ public actor CodexSessionMonitorService {
       }
     }
 
-    let ignoredPaths = ignoredWorktreePathsByRepository.values.reduce(into: Set<String>()) { result, paths in
+    let ignoredPaths = ignoredWorktreePathsByRepository.values.reduce(into: Set<String>()) {
+      result, paths in
       result.formUnion(paths)
     }
 

@@ -87,6 +87,7 @@ public struct SessionJSONLParser {
     public var messageCount: Int = 0
     public var pendingToolUses: [String: PendingToolInfo] = [:]  // toolUseId -> info
     public var recentActivities: [ActivityEntry] = []
+    public var lastAssistantMessage: String?
     public var lastActivityAt: Date?
     public var sessionStartedAt: Date?
     public var currentStatus: SessionStatus = .idle
@@ -119,11 +120,14 @@ public struct SessionJSONLParser {
   /// - Parameters:
   ///   - path: Path to the session JSONL file
   ///   - approvalTimeoutSeconds: Seconds to wait before considering a tool as awaiting approval (default: 5)
-  public static func parseSessionFile(at path: String, approvalTimeoutSeconds: Int = 0) -> ParseResult {
+  public static func parseSessionFile(at path: String, approvalTimeoutSeconds: Int = 0)
+    -> ParseResult
+  {
     var result = ParseResult()
 
     guard let data = FileManager.default.contents(atPath: path),
-          let content = String(data: data, encoding: .utf8) else {
+      let content = String(data: data, encoding: .utf8)
+    else {
       return result
     }
 
@@ -150,7 +154,9 @@ public struct SessionJSONLParser {
   ///   - lines: New lines to parse
   ///   - result: Parse result to update
   ///   - approvalTimeoutSeconds: Seconds to wait before considering a tool as awaiting approval (default: 5)
-  public static func parseNewLines(_ lines: [String], into result: inout ParseResult, approvalTimeoutSeconds: Int = 0) {
+  public static func parseNewLines(
+    _ lines: [String], into result: inout ParseResult, approvalTimeoutSeconds: Int = 0
+  ) {
     // One decoder per batch — see `parseSessionFile` for the thread-safety rationale.
     let decoder = JSONDecoder()
     for line in lines where !line.isEmpty {
@@ -239,6 +245,11 @@ public struct SessionJSONLParser {
       // Process content blocks
       if let blocks = entry.message?.content {
         processContentBlocks(blocks, timestamp: timestamp, into: &result)
+        let assistantText = blocks.compactMap(\.text).joined(separator: "\n")
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !assistantText.isEmpty {
+          result.lastAssistantMessage = String(assistantText.suffix(32_000))
+        }
       }
 
     case "summary":
@@ -288,7 +299,8 @@ public struct SessionJSONLParser {
             to: &result
           )
 
-          appendResourceLinks(extractResourceLinks(from: block.input, timestamp: timestamp), to: &result)
+          appendResourceLinks(
+            extractResourceLinks(from: block.input, timestamp: timestamp), to: &result)
           appendMCPAppResources(
             extractMCPAppResources(
               from: block.input,
@@ -328,10 +340,13 @@ public struct SessionJSONLParser {
 
           // Extract localhost URLs from tool results (e.g. dev server output)
           if let localhostURL = extractLocalhostURL(from: block.content) {
-            AppLogger.devServer.info("[SessionJSONLParser] Detected localhost URL from tool_result: \(localhostURL.absoluteString)")
+            AppLogger.devServer.info(
+              "[SessionJSONLParser] Detected localhost URL from tool_result: \(localhostURL.absoluteString)"
+            )
             result.detectedLocalhostURL = localhostURL
           }
-          appendResourceLinks(extractResourceLinks(from: block.content, timestamp: timestamp), to: &result)
+          appendResourceLinks(
+            extractResourceLinks(from: block.content, timestamp: timestamp), to: &result)
           appendMCPAppResources(
             extractMCPAppResources(from: block.content, serverName: serverName),
             to: &result
@@ -367,7 +382,9 @@ public struct SessionJSONLParser {
           appendMCPAppResources(MCPAppResourceExtractor.extract(from: text), to: &result)
           // Extract localhost URLs from assistant text (e.g. "Your app is running at http://localhost:5173")
           if let localhostURL = extractLocalhostURLFromText(text) {
-            AppLogger.devServer.info("[SessionJSONLParser] Detected localhost URL from assistant text: \(localhostURL.absoluteString)")
+            AppLogger.devServer.info(
+              "[SessionJSONLParser] Detected localhost URL from assistant text: \(localhostURL.absoluteString)"
+            )
             result.detectedLocalhostURL = localhostURL
           }
         }
@@ -388,7 +405,9 @@ public struct SessionJSONLParser {
   /// - Parameters:
   ///   - result: The parse result to update
   ///   - approvalTimeoutSeconds: Seconds to wait before considering a tool as awaiting approval (default: 5)
-  public static func updateCurrentStatus(_ result: inout ParseResult, approvalTimeoutSeconds: Int = 0) {
+  public static func updateCurrentStatus(
+    _ result: inout ParseResult, approvalTimeoutSeconds: Int = 0
+  ) {
     // State machine with timeout-based detection
     // Based on Kyle Mathews' claude-code-ui approach
     guard let lastActivity = result.recentActivities.last else {
@@ -470,8 +489,9 @@ public struct SessionJSONLParser {
   /// Extract full input parameters for code-changing tools (Edit, Write, MultiEdit)
   private static func extractCodeChangeInput(name: String, input: AnyCodable?) -> CodeChangeInput? {
     guard let input = input,
-          let dict = input.value as? [String: Any],
-          let filePath = dict["file_path"] as? String else {
+      let dict = input.value as? [String: Any],
+      let filePath = dict["file_path"] as? String
+    else {
       return nil
     }
 
@@ -499,7 +519,9 @@ public struct SessionJSONLParser {
           var result = [String: String]()
           if let oldStr = edit["old_string"] as? String { result["old_string"] = oldStr }
           if let newStr = edit["new_string"] as? String { result["new_string"] = newStr }
-          if let replaceAll = edit["replace_all"] as? Bool { result["replace_all"] = String(replaceAll) }
+          if let replaceAll = edit["replace_all"] as? Bool {
+            result["replace_all"] = String(replaceAll)
+          }
           return result.isEmpty ? nil : result
         }
       }
@@ -599,7 +621,8 @@ public struct SessionJSONLParser {
     }
 
     if result.detectedResourceLinks.count > maxDetectedResourceLinks {
-      result.detectedResourceLinks.removeFirst(result.detectedResourceLinks.count - maxDetectedResourceLinks)
+      result.detectedResourceLinks.removeFirst(
+        result.detectedResourceLinks.count - maxDetectedResourceLinks)
     }
   }
 
@@ -607,7 +630,8 @@ public struct SessionJSONLParser {
     _ descriptors: [MCPAppResourceDescriptor],
     to result: inout ParseResult
   ) {
-    for descriptor in descriptors where !result.detectedMCPAppResources.contains(where: {
+    for descriptor in descriptors
+    where !result.detectedMCPAppResources.contains(where: {
       $0.serverName == descriptor.serverName && $0.uri == descriptor.uri
     }) {
       result.detectedMCPAppResources.append(descriptor)
@@ -641,7 +665,9 @@ public struct SessionJSONLParser {
     }
   }
 
-  private static func extractResourceLinks(from content: AnyCodable?, timestamp: Date?) -> [ResourceLink] {
+  private static func extractResourceLinks(from content: AnyCodable?, timestamp: Date?)
+    -> [ResourceLink]
+  {
     guard let content else { return [] }
     return extractResourceLinks(fromJSONValue: content.value, timestamp: timestamp)
   }
@@ -654,7 +680,9 @@ public struct SessionJSONLParser {
     return MCPAppResourceExtractor.extract(from: content.value, serverName: serverName)
   }
 
-  private static func extractResourceLinks(fromJSONValue value: Any, timestamp: Date?) -> [ResourceLink] {
+  private static func extractResourceLinks(fromJSONValue value: Any, timestamp: Date?)
+    -> [ResourceLink]
+  {
     switch value {
     case let string as String:
       return prioritizedResourceLinks(from: string, timestamp: timestamp)
@@ -700,7 +728,9 @@ public struct SessionJSONLParser {
     return links
   }
 
-  private static func prioritizedResourceLinks(from text: String, timestamp: Date?) -> [ResourceLink] {
+  private static func prioritizedResourceLinks(from text: String, timestamp: Date?)
+    -> [ResourceLink]
+  {
     let links = extractResourceLinks(from: text, timestamp: timestamp)
     return prioritizingPullRequestLinks(links)
   }
@@ -723,7 +753,8 @@ public struct SessionJSONLParser {
     if let arr = content.value as? [[String: Any]] {
       for item in arr {
         if let text = item["text"] as? String,
-           let url = extractLocalhostURLFromText(text) {
+          let url = extractLocalhostURLFromText(text)
+        {
           return url
         }
       }
@@ -747,7 +778,8 @@ public struct SessionJSONLParser {
     if let arr = content.value as? [[String: Any]] {
       for item in arr {
         if let text = item["text"] as? String,
-           text.lowercased().contains("error") {
+          text.lowercased().contains("error")
+        {
           return true
         }
       }

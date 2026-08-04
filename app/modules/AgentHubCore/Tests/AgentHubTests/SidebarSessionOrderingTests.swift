@@ -11,7 +11,7 @@ struct SidebarSessionOrderingTests {
       path: "/tmp/RepoA",
       worktrees: [
         WorktreeBranch(name: "main", path: "/tmp/RepoA", isWorktree: false),
-        WorktreeBranch(name: "feature", path: "/tmp/RepoA-feature", isWorktree: true)
+        WorktreeBranch(name: "feature", path: "/tmp/RepoA-feature", isWorktree: true),
       ]
     )
     let repoB = SelectedRepository(path: "/tmp/RepoB")
@@ -19,7 +19,7 @@ struct SidebarSessionOrderingTests {
     let items = [
       item("b-newest", projectPath: "/tmp/RepoB", timestamp: 400),
       item("a-worktree", projectPath: "/tmp/RepoA-feature", timestamp: 300),
-      item("a-main", projectPath: "/tmp/RepoA", timestamp: 100)
+      item("a-main", projectPath: "/tmp/RepoA", timestamp: 100),
     ]
 
     let ids = flattenedIDs(
@@ -38,7 +38,7 @@ struct SidebarSessionOrderingTests {
       path: "/tmp/RepoA",
       worktrees: [
         WorktreeBranch(name: "main", path: "/tmp/RepoA", isWorktree: false),
-        WorktreeBranch(name: "feature", path: "/tmp/RepoA-feature", isWorktree: true)
+        WorktreeBranch(name: "feature", path: "/tmp/RepoA-feature", isWorktree: true),
       ]
     )
     let repoB = SelectedRepository(path: "/tmp/RepoB")
@@ -46,7 +46,7 @@ struct SidebarSessionOrderingTests {
     let items = [
       item("b-newest", projectPath: "/tmp/RepoB", timestamp: 400),
       item("a-worktree", projectPath: "/tmp/RepoA-feature", timestamp: 300),
-      item("a-main", projectPath: "/tmp/RepoA", timestamp: 100)
+      item("a-main", projectPath: "/tmp/RepoA", timestamp: 100),
     ]
 
     let ids = flattenedIDs(
@@ -65,7 +65,7 @@ struct SidebarSessionOrderingTests {
       path: "/tmp/RepoA",
       worktrees: [
         WorktreeBranch(name: "main", path: "/tmp/RepoA", isWorktree: false),
-        WorktreeBranch(name: "feature", path: "/tmp/RepoA-feature", isWorktree: true)
+        WorktreeBranch(name: "feature", path: "/tmp/RepoA-feature", isWorktree: true),
       ]
     )
     let repoB = SelectedRepository(path: "/tmp/RepoB")
@@ -74,7 +74,7 @@ struct SidebarSessionOrderingTests {
       from: [
         item("b", projectPath: "/tmp/RepoB", timestamp: 300),
         item("a-worktree", projectPath: "/tmp/RepoA-feature", timestamp: 200),
-        item("a-main", projectPath: "/tmp/RepoA", timestamp: 100)
+        item("a-main", projectPath: "/tmp/RepoA", timestamp: 100),
       ],
       repositories: [repoA, repoB],
       worktreeDisplayMode: .separateModules,
@@ -89,13 +89,41 @@ struct SidebarSessionOrderingTests {
     #expect(sections[1].groups.map(\.id) == ["/tmp/RepoB"])
   }
 
+  @Test("Folder sections contain direct child repositories and not grandchildren")
+  func folderSectionsContainOnlyDirectChildren() {
+    let childA = SelectedRepository(path: "/tmp/Projects/AppA")
+    let childB = SelectedRepository(path: "/tmp/Projects/AppB")
+    let grandchild = SelectedRepository(path: "/tmp/Projects/AppA/Examples/Demo")
+
+    let sections = SidebarSessionOrdering.repositoryModuleSections(
+      from: [
+        item("a", projectPath: childA.path, timestamp: 300),
+        item("b", projectPath: childB.path, timestamp: 200),
+        item("demo", projectPath: grandchild.path, timestamp: 100),
+      ],
+      repositories: [childA, childB, grandchild],
+      selectedFolderPaths: ["/tmp/Projects"],
+      worktreeDisplayMode: .parent,
+      isPinned: { $0.isPinned },
+      projectPath: { $0.projectPath },
+      timestamp: { $0.timestamp },
+      id: { $0.id }
+    )
+
+    #expect(sections[0].id == "/tmp/Projects")
+    #expect(sections[0].isFolderGroup)
+    #expect(sections[0].groups.map(\.id) == [childA.path, childB.path])
+    #expect(sections[1].id == grandchild.path)
+    #expect(!sections[1].isFolderGroup)
+  }
+
   @Test("Status grouping flattens by status section order")
   func statusGroupingFlattensByStatusOrder() {
     let items = [
       item("idle-newest", timestamp: 500, status: .idle),
       item("ready", timestamp: 400, status: .waitingForUser),
       item("working", timestamp: 300, status: .thinking),
-      item("approval", timestamp: 200, status: .awaitingApproval(tool: "Edit"))
+      item("approval", timestamp: 200, status: .awaitingApproval(tool: "Edit")),
     ]
 
     let ids = flattenedIDs(items, groupMode: .status)
@@ -107,7 +135,7 @@ struct SidebarSessionOrderingTests {
   func pinnedSessionsStayFirst() {
     let items = [
       item("repo-item", projectPath: "/tmp/Repo", timestamp: 500),
-      item("pinned-old", projectPath: "/tmp/Repo", timestamp: 100, isPinned: true)
+      item("pinned-old", projectPath: "/tmp/Repo", timestamp: 100, isPinned: true),
     ]
 
     let ids = flattenedIDs(
@@ -125,7 +153,7 @@ struct SidebarSessionOrderingTests {
     let repoB = SelectedRepository(path: "/tmp/RepoB")
     let items = [
       item("a", projectPath: "/tmp/RepoA", timestamp: 200),
-      item("b", projectPath: "/tmp/RepoB", timestamp: 100)
+      item("b", projectPath: "/tmp/RepoB", timestamp: 100),
     ]
 
     let ids = flattenedIDs(
@@ -145,7 +173,7 @@ struct SidebarSessionOrderingTests {
     let items = [
       item("newest", timestamp: 500, isPinned: true),
       item("middle", timestamp: 300, isPinned: true),
-      item("oldest", timestamp: 100, isPinned: true)
+      item("oldest", timestamp: 100, isPinned: true),
     ]
 
     let ids = pinnedIDs(items, manualOrder: ["oldest": 0, "newest": 1, "middle": 2])
@@ -159,7 +187,7 @@ struct SidebarSessionOrderingTests {
       item("arranged-second", timestamp: 100, isPinned: true),
       item("just-pinned-old", timestamp: 200, isPinned: true),
       item("arranged-first", timestamp: 300, isPinned: true),
-      item("just-pinned-new", timestamp: 400, isPinned: true)
+      item("just-pinned-new", timestamp: 400, isPinned: true),
     ]
 
     let ids = pinnedIDs(items, manualOrder: ["arranged-first": 0, "arranged-second": 1])
@@ -172,7 +200,7 @@ struct SidebarSessionOrderingTests {
     let items = [
       item("pinned-newest", timestamp: 500, isPinned: true),
       item("pinned-oldest", timestamp: 100, isPinned: true),
-      item("unpinned", timestamp: 400)
+      item("unpinned", timestamp: 400),
     ]
 
     let ids = flattenedIDs(
@@ -188,7 +216,7 @@ struct SidebarSessionOrderingTests {
   func manualOrderDoesNotPromoteUnpinnedSessions() {
     let items = [
       item("pinned", timestamp: 100, isPinned: true),
-      item("unpinned", timestamp: 500)
+      item("unpinned", timestamp: 500),
     ]
 
     let ids = pinnedIDs(items, manualOrder: ["unpinned": 0, "pinned": 1])
@@ -236,36 +264,40 @@ struct SidebarSessionOrderingTests {
 
   @Test("A placement that resolves to the current slot is a no-op")
   func unchangedDropPlacementReturnsNil() {
-    #expect(SidebarSessionOrdering.reorderedIDs(
-      ["a", "b", "c"],
-      movingID: "b",
-      targetID: "a",
-      placement: .after
-    ) == nil)
+    #expect(
+      SidebarSessionOrdering.reorderedIDs(
+        ["a", "b", "c"],
+        movingID: "b",
+        targetID: "a",
+        placement: .after
+      ) == nil)
   }
 
   @Test("Reorder rejects unknown rows and self-targeting")
   func reorderRejectsInvalidInput() {
-    #expect(SidebarSessionOrdering.reorderedIDs(
-      ["a", "b"],
-      movingID: "missing",
-      targetID: "a",
-      placement: .before
-    ) == nil)
+    #expect(
+      SidebarSessionOrdering.reorderedIDs(
+        ["a", "b"],
+        movingID: "missing",
+        targetID: "a",
+        placement: .before
+      ) == nil)
 
-    #expect(SidebarSessionOrdering.reorderedIDs(
-      ["a", "b"],
-      movingID: "a",
-      targetID: "missing",
-      placement: .after
-    ) == nil)
+    #expect(
+      SidebarSessionOrdering.reorderedIDs(
+        ["a", "b"],
+        movingID: "a",
+        targetID: "missing",
+        placement: .after
+      ) == nil)
 
-    #expect(SidebarSessionOrdering.reorderedIDs(
-      ["a", "b"],
-      movingID: "a",
-      targetID: "a",
-      placement: .after
-    ) == nil)
+    #expect(
+      SidebarSessionOrdering.reorderedIDs(
+        ["a", "b"],
+        movingID: "a",
+        targetID: "a",
+        placement: .after
+      ) == nil)
   }
 
   @Test("The same target placement stays stable after rows animate around it")
@@ -304,9 +336,12 @@ struct SidebarSessionOrderingTests {
     let ids = ["first", "second", "third"]
 
     #expect(SidebarSessionOrdering.nextID(in: ids, currentID: nil, direction: .forward) == "first")
-    #expect(SidebarSessionOrdering.nextID(in: ids, currentID: "first", direction: .forward) == "second")
-    #expect(SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .forward) == "third")
-    #expect(SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .backward) == "second")
+    #expect(
+      SidebarSessionOrdering.nextID(in: ids, currentID: "first", direction: .forward) == "second")
+    #expect(
+      SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .forward) == "third")
+    #expect(
+      SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .backward) == "second")
   }
 }
 

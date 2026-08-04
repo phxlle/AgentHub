@@ -54,6 +54,7 @@ public struct CodexSessionJSONLParser {
     public var messageCount: Int = 0
     public var pendingToolUses: [String: PendingToolInfo] = [:]
     public var recentActivities: [ActivityEntry] = []
+    public var lastAssistantMessage: String?
     public var lastActivityAt: Date?
     public var sessionStartedAt: Date?
     public var currentStatus: SessionStatus = .idle
@@ -86,31 +87,36 @@ public struct CodexSessionJSONLParser {
     defer { try? handle.close() }
 
     guard let data = try? handle.readToEnd(),
-          let content = String(data: data, encoding: .utf8) else {
+      let content = String(data: data, encoding: .utf8)
+    else {
       return result
     }
 
     for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
       guard let lineData = line.data(using: .utf8),
-            let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-            let type = entry["type"] as? String else { continue }
+        let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+        let type = entry["type"] as? String
+      else { continue }
 
       switch type {
       case "turn_context":
         if let payload = entry["payload"] as? [String: Any],
-           let model = payload["model"] as? String {
+          let model = payload["model"] as? String
+        {
           result.model = model
         }
 
       case "event_msg":
         guard let payload = entry["payload"] as? [String: Any],
-              let eventType = payload["type"] as? String else { continue }
+          let eventType = payload["type"] as? String
+        else { continue }
 
         if eventType == "user_message" || eventType == "agent_message" {
           result.messageCount += 1
         } else if eventType == "token_count",
-                  let info = payload["info"] as? [String: Any],
-                  let total = info["total_token_usage"] as? [String: Any] {
+          let info = payload["info"] as? [String: Any],
+          let total = info["total_token_usage"] as? [String: Any]
+        {
           let input = (total["input_tokens"] as? Int) ?? 0
           let cached = (total["cached_input_tokens"] as? Int) ?? 0
           let output = (total["output_tokens"] as? Int) ?? 0
@@ -131,13 +137,15 @@ public struct CodexSessionJSONLParser {
     var result = SessionSummaryParseResult()
 
     guard let data = FileManager.default.contents(atPath: path),
-          let content = String(data: data, encoding: .utf8) else {
+      let content = String(data: data, encoding: .utf8)
+    else {
       return result
     }
 
     for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
       guard let lineData = line.data(using: .utf8),
-            let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+        let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
+      else {
         continue
       }
       processSummaryEntry(entry, into: &result)
@@ -146,11 +154,14 @@ public struct CodexSessionJSONLParser {
     return result
   }
 
-  public static func parseSessionFile(at path: String, approvalTimeoutSeconds: Int = 0) -> ParseResult {
+  public static func parseSessionFile(at path: String, approvalTimeoutSeconds: Int = 0)
+    -> ParseResult
+  {
     var result = ParseResult()
 
     guard let data = FileManager.default.contents(atPath: path),
-          let content = String(data: data, encoding: .utf8) else {
+      let content = String(data: data, encoding: .utf8)
+    else {
       return result
     }
 
@@ -164,7 +175,9 @@ public struct CodexSessionJSONLParser {
     return result
   }
 
-  public static func parseNewLines(_ lines: [String], into result: inout ParseResult, approvalTimeoutSeconds: Int = 0) {
+  public static func parseNewLines(
+    _ lines: [String], into result: inout ParseResult, approvalTimeoutSeconds: Int = 0
+  ) {
     for line in lines where !line.isEmpty {
       if let entry = parseEntry(line) {
         processEntry(entry, into: &result)
@@ -194,7 +207,8 @@ public struct CodexSessionJSONLParser {
     switch type {
     case "session_meta":
       if let payload = entry["payload"] as? [String: Any],
-         let tsString = payload["timestamp"] as? String {
+        let tsString = payload["timestamp"] as? String
+      {
         if result.sessionStartedAt == nil {
           result.sessionStartedAt = parseTimestamp(tsString)
         }
@@ -202,18 +216,21 @@ public struct CodexSessionJSONLParser {
 
     case "turn_context":
       if let payload = entry["payload"] as? [String: Any],
-         let model = payload["model"] as? String {
+        let model = payload["model"] as? String
+      {
         result.model = model
       }
 
     case "event_msg":
       guard let payload = entry["payload"] as? [String: Any],
-            let eventType = payload["type"] as? String else { return }
+        let eventType = payload["type"] as? String
+      else { return }
       handleEventMessage(type: eventType, payload: payload, timestamp: timestamp, result: &result)
 
     case "response_item":
       guard let payload = entry["payload"] as? [String: Any],
-            let payloadType = payload["type"] as? String else { return }
+        let payloadType = payload["type"] as? String
+      else { return }
       handleResponseItem(type: payloadType, payload: payload, timestamp: timestamp, result: &result)
 
     default:
@@ -221,15 +238,18 @@ public struct CodexSessionJSONLParser {
     }
   }
 
-  private static func processSummaryEntry(_ entry: [String: Any], into result: inout SessionSummaryParseResult) {
+  private static func processSummaryEntry(
+    _ entry: [String: Any], into result: inout SessionSummaryParseResult
+  ) {
     if let timestamp = CodexTimestampParser.parse(entry["timestamp"] as? String) {
       result.lastActivityAt = timestamp
     }
 
     guard let type = entry["type"] as? String,
-          type == "event_msg",
-          let payload = entry["payload"] as? [String: Any],
-          let eventType = payload["type"] as? String else {
+      type == "event_msg",
+      let payload = entry["payload"] as? [String: Any],
+      let eventType = payload["type"] as? String
+    else {
       return
     }
 
@@ -263,19 +283,24 @@ public struct CodexSessionJSONLParser {
     case "user_message":
       result.messageCount += 1
       if let message = payload["message"] as? String, !message.isEmpty {
-        addActivity(type: .userMessage, description: String(message.prefix(80)), timestamp: timestamp, to: &result)
+        addActivity(
+          type: .userMessage, description: String(message.prefix(80)), timestamp: timestamp,
+          to: &result)
       }
 
     case "agent_message":
       result.messageCount += 1
       if let message = payload["message"] as? String, !message.isEmpty {
+        result.lastAssistantMessage = String(message.suffix(32_000))
         if message.contains("```mermaid") { result.hasMermaidContent = true }
         appendResourceLinks(extractResourceLinks(from: message, timestamp: timestamp), to: &result)
         appendMCPAppResources(MCPAppResourceExtractor.extract(from: message), to: &result)
         if let localhostURL = extractLocalhostURLFromText(message) {
           result.detectedLocalhostURL = localhostURL
         }
-        addActivity(type: .assistantMessage, description: String(message.prefix(80)), timestamp: timestamp, to: &result)
+        addActivity(
+          type: .assistantMessage, description: String(message.prefix(80)), timestamp: timestamp,
+          to: &result)
       }
 
     case "agent_reasoning":
@@ -303,7 +328,8 @@ public struct CodexSessionJSONLParser {
       }
 
     case "mcp_tool_call_end":
-      appendResourceLinks(extractResourceLinks(fromJSONValue: payload, timestamp: timestamp), to: &result)
+      appendResourceLinks(
+        extractResourceLinks(fromJSONValue: payload, timestamp: timestamp), to: &result)
       appendMCPAppResources(MCPAppResourceExtractor.extract(from: payload), to: &result)
       captureMCPAppInvocation(from: payload, into: &result)
 
@@ -320,8 +346,9 @@ public struct CodexSessionJSONLParser {
     into result: inout ParseResult
   ) {
     guard let invocation = payload["invocation"] as? [String: Any],
-          let server = invocation["server"] as? String,
-          let tool = invocation["tool"] as? String else {
+      let server = invocation["server"] as? String,
+      let tool = invocation["tool"] as? String
+    else {
       return
     }
     let callId = (payload["call_id"] as? String) ?? "\(server)|\(tool)"
@@ -373,21 +400,27 @@ public struct CodexSessionJSONLParser {
     switch type {
     case "function_call":
       guard let name = payload["name"] as? String,
-            let callId = payload["call_id"] as? String else { return }
-      result.pendingToolUses[callId] = PendingToolInfo(toolName: name, toolUseId: callId, timestamp: timestamp ?? Date())
+        let callId = payload["call_id"] as? String
+      else { return }
+      result.pendingToolUses[callId] = PendingToolInfo(
+        toolName: name, toolUseId: callId, timestamp: timestamp ?? Date())
       addActivity(type: .toolUse(name: name), description: name, timestamp: timestamp, to: &result)
 
     case "function_call_output":
       if let callId = payload["call_id"] as? String {
         let toolName = result.pendingToolUses[callId]?.toolName ?? "tool"
         result.pendingToolUses.removeValue(forKey: callId)
-        addActivity(type: .toolResult(name: toolName, success: true), description: "Completed", timestamp: timestamp, to: &result)
+        addActivity(
+          type: .toolResult(name: toolName, success: true), description: "Completed",
+          timestamp: timestamp, to: &result)
         // Extract localhost URLs from tool output
         if let output = payload["output"] as? String,
-           let localhostURL = extractLocalhostURLFromText(output) {
+          let localhostURL = extractLocalhostURLFromText(output)
+        {
           result.detectedLocalhostURL = localhostURL
         }
-        appendResourceLinks(extractResourceLinks(fromJSONValue: payload, timestamp: timestamp), to: &result)
+        appendResourceLinks(
+          extractResourceLinks(fromJSONValue: payload, timestamp: timestamp), to: &result)
         appendMCPAppResources(MCPAppResourceExtractor.extract(from: payload), to: &result)
       }
 
@@ -396,7 +429,9 @@ public struct CodexSessionJSONLParser {
       let status = payload["status"] as? String
       addActivity(type: .toolUse(name: name), description: name, timestamp: timestamp, to: &result)
       if status == "completed" {
-        addActivity(type: .toolResult(name: name, success: true), description: "Completed", timestamp: timestamp, to: &result)
+        addActivity(
+          type: .toolResult(name: name, success: true), description: "Completed",
+          timestamp: timestamp, to: &result)
       }
 
     default:
@@ -406,7 +441,9 @@ public struct CodexSessionJSONLParser {
 
   // MARK: - Status
 
-  public static func updateCurrentStatus(_ result: inout ParseResult, approvalTimeoutSeconds: Int = 0) {
+  public static func updateCurrentStatus(
+    _ result: inout ParseResult, approvalTimeoutSeconds: Int = 0
+  ) {
     guard let lastActivity = result.recentActivities.last else {
       result.currentStatus = .idle
       return
@@ -460,7 +497,8 @@ public struct CodexSessionJSONLParser {
     }
 
     if result.detectedResourceLinks.count > maxDetectedResourceLinks {
-      result.detectedResourceLinks.removeFirst(result.detectedResourceLinks.count - maxDetectedResourceLinks)
+      result.detectedResourceLinks.removeFirst(
+        result.detectedResourceLinks.count - maxDetectedResourceLinks)
     }
   }
 
@@ -468,7 +506,8 @@ public struct CodexSessionJSONLParser {
     _ descriptors: [MCPAppResourceDescriptor],
     to result: inout ParseResult
   ) {
-    for descriptor in descriptors where !result.detectedMCPAppResources.contains(where: {
+    for descriptor in descriptors
+    where !result.detectedMCPAppResources.contains(where: {
       $0.serverName == descriptor.serverName && $0.uri == descriptor.uri
     }) {
       result.detectedMCPAppResources.append(descriptor)
@@ -481,7 +520,9 @@ public struct CodexSessionJSONLParser {
     }
   }
 
-  private static func extractResourceLinks(fromJSONValue value: Any, timestamp: Date?) -> [ResourceLink] {
+  private static func extractResourceLinks(fromJSONValue value: Any, timestamp: Date?)
+    -> [ResourceLink]
+  {
     switch value {
     case let string as String:
       return prioritizedResourceLinks(from: string, timestamp: timestamp)
@@ -499,10 +540,12 @@ public struct CodexSessionJSONLParser {
   }
 
   private static func extractResourceLinks(from text: String, timestamp: Date?) -> [ResourceLink] {
-    guard let regex = try? NSRegularExpression(
-      pattern: "https?://[^\\s)\\]>\"'`]+",
-      options: []
-    ) else { return [] }
+    guard
+      let regex = try? NSRegularExpression(
+        pattern: "https?://[^\\s)\\]>\"'`]+",
+        options: []
+      )
+    else { return [] }
 
     let range = NSRange(text.startIndex..., in: text)
     let matches = regex.matches(in: text, options: [], range: range)
@@ -519,7 +562,9 @@ public struct CodexSessionJSONLParser {
     return links
   }
 
-  private static func prioritizedResourceLinks(from text: String, timestamp: Date?) -> [ResourceLink] {
+  private static func prioritizedResourceLinks(from text: String, timestamp: Date?)
+    -> [ResourceLink]
+  {
     let links = extractResourceLinks(from: text, timestamp: timestamp)
     return prioritizingPullRequestLinks(links)
   }

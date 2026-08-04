@@ -5,8 +5,8 @@
 //  Shows Claude and Codex sections side-by-side in the left panel.
 //
 
-import AppKit
 import AgentHubGitHub
+import AppKit
 import Foundation
 import PierreDiffsSwift
 import SwiftUI
@@ -72,7 +72,9 @@ private struct ArchiveConfirmationAlert: ViewModifier {
       }
     } message: {
       if let confirmation {
-        Text("This will archive the threads in \(confirmation.repoName). You can find them later in your archived threads.")
+        Text(
+          "This will archive the threads in \(confirmation.repoName). You can find them later in your archived threads."
+        )
       }
     }
   }
@@ -104,8 +106,8 @@ private struct RemoveConfirmationAlert: ViewModifier {
   }
 }
 
-private extension StatusGroupCategory {
-  var color: Color {
+extension StatusGroupCategory {
+  fileprivate var color: Color {
     switch self {
     case .needsAttention: return .yellow
     case .working: return .blue
@@ -141,6 +143,7 @@ public struct MultiProviderSessionsListView: View {
   @State private var primarySessionId: String?
   @State private var showCommandPalette = false
   @State private var collapsedProjectGroups: Set<String> = []
+  @State private var collapsedFolderGroups: Set<String> = []
   @State private var expandedWorkspaceSessionGroups: Set<String> = []
   @State private var sidebarGroupMode: SidebarGroupMode = .repo
   @State private var collapsedStatusGroups: Set<StatusGroupCategory> = []
@@ -281,6 +284,9 @@ public struct MultiProviderSessionsListView: View {
       syncModuleLandingSelection()
       ensurePrimarySelection()
     }
+    .onChange(of: orderedSelectedFolderPaths) { _, _ in
+      syncPendingModuleRows()
+    }
     .onChange(of: sidebarGroupMode) { _, newMode in
       guard newMode != .repo else { return }
       selectedModuleLandingPath = nil
@@ -297,8 +303,16 @@ public struct MultiProviderSessionsListView: View {
     .alert(
       "Failed to Delete Worktree",
       isPresented: Binding(
-        get: { claudeViewModel.worktreeDeletionError != nil || codexViewModel.worktreeDeletionError != nil },
-        set: { if !$0 { claudeViewModel.clearWorktreeDeletionError(); codexViewModel.clearWorktreeDeletionError() } }
+        get: {
+          claudeViewModel.worktreeDeletionError != nil
+            || codexViewModel.worktreeDeletionError != nil
+        },
+        set: {
+          if !$0 {
+            claudeViewModel.clearWorktreeDeletionError()
+            codexViewModel.clearWorktreeDeletionError()
+          }
+        }
       )
     ) {
       let error = claudeViewModel.worktreeDeletionError ?? codexViewModel.worktreeDeletionError
@@ -307,10 +321,12 @@ public struct MultiProviderSessionsListView: View {
           let isClaudeError = claudeViewModel.worktreeDeletionError != nil
           if isClaudeError {
             codexViewModel.clearWorktreeDeletionError()
-            claudeViewModel.forceDeleteOrphanedWorktree(error.worktree, parentRepoPath: parentRepoPath)
+            claudeViewModel.forceDeleteOrphanedWorktree(
+              error.worktree, parentRepoPath: parentRepoPath)
           } else {
             claudeViewModel.clearWorktreeDeletionError()
-            codexViewModel.forceDeleteOrphanedWorktree(error.worktree, parentRepoPath: parentRepoPath)
+            codexViewModel.forceDeleteOrphanedWorktree(
+              error.worktree, parentRepoPath: parentRepoPath)
           }
         }
         Button("Cancel", role: .cancel) {
@@ -337,9 +353,13 @@ public struct MultiProviderSessionsListView: View {
       let error = claudeViewModel.worktreeDeletionError ?? codexViewModel.worktreeDeletionError
       if let error {
         if error.isOrphaned, let parentRepoPath = error.parentRepoPath {
-          Text("The worktree at:\n\(error.worktree.path)\n\nhas no parent repo. You can prune and delete it from:\n\(parentRepoPath)")
+          Text(
+            "The worktree at:\n\(error.worktree.path)\n\nhas no parent repo. You can prune and delete it from:\n\(parentRepoPath)"
+          )
         } else {
-          Text("\(error.message)\n\n\"Force Delete\" will remove the worktree even if it contains untracked files.")
+          Text(
+            "\(error.message)\n\n\"Force Delete\" will remove the worktree even if it contains untracked files."
+          )
         }
       }
     }
@@ -445,7 +465,8 @@ public struct MultiProviderSessionsListView: View {
 
       Group {
         if let selectedWorkspaceID,
-           let workspace = workspaceViewModel.workspace(id: selectedWorkspaceID) {
+          let workspace = workspaceViewModel.workspace(id: selectedWorkspaceID)
+        {
           AgentWorkspaceDetailView(
             workspace: workspace,
             viewModel: workspaceViewModel,
@@ -553,7 +574,7 @@ public struct MultiProviderSessionsListView: View {
           colors: [
             Color.surfaceCanvas,
             Color.surfaceCanvas.opacity(colorScheme == .dark ? 0.98 : 0.94),
-            Color.brandTertiary.opacity(colorScheme == .dark ? 0.06 : 0.1)
+            Color.brandTertiary.opacity(colorScheme == .dark ? 0.06 : 0.1),
           ],
           startPoint: .topLeading,
           endPoint: .bottomTrailing
@@ -721,7 +742,9 @@ public struct MultiProviderSessionsListView: View {
       Button(action: { currentViewModel.showSearchFilterPicker() }) {
         Image(systemName: "folder.badge.plus")
           .font(.system(size: DesignTokens.IconSize.md))
-          .foregroundColor(currentViewModel.hasSearchFilter ? .brandPrimary(for: currentViewModel.providerKind) : .secondary)
+          .foregroundColor(
+            currentViewModel.hasSearchFilter
+              ? .brandPrimary(for: currentViewModel.providerKind) : .secondary)
       }
       .buttonStyle(.plain)
       .help("Filter by repository")
@@ -747,7 +770,8 @@ public struct MultiProviderSessionsListView: View {
       }
 
       TextField(
-        currentViewModel.hasSearchFilter ? "Search in \(currentViewModel.searchFilterName ?? "")..." : "Search all sessions...",
+        currentViewModel.hasSearchFilter
+          ? "Search in \(currentViewModel.searchFilterName ?? "")..." : "Search all sessions...",
         text: Binding(
           get: { currentViewModel.searchQuery },
           set: { currentViewModel.searchQuery = $0 }
@@ -786,7 +810,10 @@ public struct MultiProviderSessionsListView: View {
     )
     .overlay(
       RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
-        .stroke(currentViewModel.isSearchActive || currentViewModel.hasSearchFilter ? Color.brandPrimary(for: currentViewModel.providerKind).opacity(0.5) : Color.borderSubtle, lineWidth: 1)
+        .stroke(
+          currentViewModel.isSearchActive || currentViewModel.hasSearchFilter
+            ? Color.brandPrimary(for: currentViewModel.providerKind).opacity(0.5)
+            : Color.borderSubtle, lineWidth: 1)
     )
   }
 
@@ -842,11 +869,15 @@ public struct MultiProviderSessionsListView: View {
 
   /// Identity of a sidebar row. Shared by the full build and the cheap token
   /// below so the two can never disagree about what a row is called.
-  private static func pendingItemID(_ providerKind: SessionProviderKind, _ pendingID: UUID) -> String {
+  private static func pendingItemID(_ providerKind: SessionProviderKind, _ pendingID: UUID)
+    -> String
+  {
     SidebarSessionItemID.pending(provider: providerKind, pendingId: pendingID)
   }
 
-  private static func monitoredItemID(_ providerKind: SessionProviderKind, _ sessionID: String) -> String {
+  private static func monitoredItemID(_ providerKind: SessionProviderKind, _ sessionID: String)
+    -> String
+  {
     SidebarSessionItemID.monitored(provider: providerKind, sessionId: sessionID)
   }
 
@@ -879,54 +910,58 @@ public struct MultiProviderSessionsListView: View {
     var results: [SelectedSessionItem] = []
 
     for pending in claudeViewModel.pendingHubSessions {
-      results.append(SelectedSessionItem(
-        id: Self.pendingItemID(.claude, pending.id),
-        session: pending.placeholderSession,
-        providerKind: .claude,
-        timestamp: pending.startedAt,
-        isPending: true,
-        sessionStatus: nil,
-        linkedPullRequests: []
-      ))
+      results.append(
+        SelectedSessionItem(
+          id: Self.pendingItemID(.claude, pending.id),
+          session: pending.placeholderSession,
+          providerKind: .claude,
+          timestamp: pending.startedAt,
+          isPending: true,
+          sessionStatus: nil,
+          linkedPullRequests: []
+        ))
     }
 
     for pending in codexViewModel.pendingHubSessions {
-      results.append(SelectedSessionItem(
-        id: Self.pendingItemID(.codex, pending.id),
-        session: pending.placeholderSession,
-        providerKind: .codex,
-        timestamp: pending.startedAt,
-        isPending: true,
-        sessionStatus: nil,
-        linkedPullRequests: []
-      ))
+      results.append(
+        SelectedSessionItem(
+          id: Self.pendingItemID(.codex, pending.id),
+          session: pending.placeholderSession,
+          providerKind: .codex,
+          timestamp: pending.startedAt,
+          isPending: true,
+          sessionStatus: nil,
+          linkedPullRequests: []
+        ))
     }
 
     // Reads the narrow `sessionStatus`/`pullRequestReferences` projections rather
     // than `monitorStates`, so a publish that only moves token counts or the
     // activity feed no longer rebuilds this list or re-creates every row.
     for session in claudeViewModel.monitoredCLISessions {
-      results.append(SelectedSessionItem(
-        id: Self.monitoredItemID(.claude, session.id),
-        session: session,
-        providerKind: .claude,
-        timestamp: session.lastActivityAt,
-        isPending: false,
-        sessionStatus: claudeViewModel.sessionStatus(for: session.id),
-        linkedPullRequests: claudeViewModel.pullRequestReferences(for: session.id)
-      ))
+      results.append(
+        SelectedSessionItem(
+          id: Self.monitoredItemID(.claude, session.id),
+          session: session,
+          providerKind: .claude,
+          timestamp: session.lastActivityAt,
+          isPending: false,
+          sessionStatus: claudeViewModel.sessionStatus(for: session.id),
+          linkedPullRequests: claudeViewModel.pullRequestReferences(for: session.id)
+        ))
     }
 
     for session in codexViewModel.monitoredCLISessions {
-      results.append(SelectedSessionItem(
-        id: Self.monitoredItemID(.codex, session.id),
-        session: session,
-        providerKind: .codex,
-        timestamp: session.lastActivityAt,
-        isPending: false,
-        sessionStatus: codexViewModel.sessionStatus(for: session.id),
-        linkedPullRequests: codexViewModel.pullRequestReferences(for: session.id)
-      ))
+      results.append(
+        SelectedSessionItem(
+          id: Self.monitoredItemID(.codex, session.id),
+          session: session,
+          providerKind: .codex,
+          timestamp: session.lastActivityAt,
+          isPending: false,
+          sessionStatus: codexViewModel.sessionStatus(for: session.id),
+          linkedPullRequests: codexViewModel.pullRequestReferences(for: session.id)
+        ))
     }
 
     return results.sorted { $0.timestamp > $1.timestamp }
@@ -949,6 +984,15 @@ public struct MultiProviderSessionsListView: View {
     )
     // Newest-added first (reverse of insertion order).
     return combined.reversed()
+  }
+
+  private var orderedSelectedFolderPaths: [String] {
+    var seen: Set<String> = []
+    let combined = claudeViewModel.selectedFolderPaths + codexViewModel.selectedFolderPaths
+    return combined.reversed().compactMap { path in
+      let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
+      return seen.insert(normalizedPath).inserted ? normalizedPath : nil
+    }
   }
 
   private var worktreeDisplayMode: WorktreeDisplayMode {
@@ -997,12 +1041,14 @@ public struct MultiProviderSessionsListView: View {
     placement: PinnedSessionDropPlacement
   ) {
     let currentIDs = pinnedSessionItems(from: selectedSessionItems).map(\.id)
-    guard let reordered = SidebarSessionOrdering.reorderedIDs(
-      currentIDs,
-      movingID: movingID,
-      targetID: targetID,
-      placement: placement
-    ) else { return }
+    guard
+      let reordered = SidebarSessionOrdering.reorderedIDs(
+        currentIDs,
+        movingID: movingID,
+        targetID: targetID,
+        placement: placement
+      )
+    else { return }
 
     withAnimation(accessibilityReduceMotion ? nil : .snappy(duration: 0.18)) {
       pinnedSessionOrder = Dictionary(
@@ -1060,6 +1106,7 @@ public struct MultiProviderSessionsListView: View {
     SidebarSessionOrdering.repositoryModuleSections(
       from: items,
       repositories: Array(orderedTrackedRepos),
+      selectedFolderPaths: orderedSelectedFolderPaths,
       worktreeDisplayMode: worktreeDisplayMode,
       isPinned: isPinned,
       projectPath: { $0.session.projectPath },
@@ -1116,14 +1163,59 @@ public struct MultiProviderSessionsListView: View {
           if selectedModuleLandingPath == group.id {
             selectedModuleLandingPath = nil
           }
-          if let repo = selectedRepository(in: claudeViewModel.selectedRepositories, matching: group.id) {
+          if let repo = selectedRepository(
+            in: claudeViewModel.selectedRepositories, matching: group.id)
+          {
             claudeViewModel.removeRepository(repo)
           }
-          if let repo = selectedRepository(in: codexViewModel.selectedRepositories, matching: group.id) {
+          if let repo = selectedRepository(
+            in: codexViewModel.selectedRepositories, matching: group.id)
+          {
             codexViewModel.removeRepository(repo)
           }
         }
       }
+    }
+  }
+
+  private func requestFolderRemoval(
+    _ section: SidebarRepositoryModuleSection<SelectedSessionItem>
+  ) {
+    let sessionCount = section.groups.reduce(0) { $0 + $1.items.count }
+    let groupPaths = Set(section.groups.map(\.id))
+    let workspaces = workspaceViewModel.workspaces.filter {
+      groupPaths.contains(WorktreeModuleResolver.normalizedDirectoryPath($0.projectPath))
+    }
+    var effects: [String] = []
+    if sessionCount > 0 {
+      effects.append("archive \(sessionCount) active \(sessionCount == 1 ? "thread" : "threads")")
+    }
+    if !workspaces.isEmpty {
+      effects.append(
+        "close \(workspaces.count) \(workspaces.count == 1 ? "workspace" : "workspaces")")
+    }
+    let message =
+      effects.isEmpty
+      ? "This will remove the folder and its project groups from your list."
+      : "This will \(effects.joined(separator: " and ")) and remove the folder from your list."
+
+    removeConfirmation = RemoveConfirmation(
+      title: "Remove \(section.displayName)?",
+      message: message
+    ) {
+      Task {
+        for workspace in workspaces {
+          await workspaceViewModel.closeWorkspace(id: workspace.id)
+        }
+      }
+      if workspaces.contains(where: { $0.id == selectedWorkspaceID }) {
+        selectedWorkspaceID = nil
+      }
+      if let selectedModuleLandingPath, groupPaths.contains(selectedModuleLandingPath) {
+        self.selectedModuleLandingPath = nil
+      }
+      claudeViewModel.removeFolder(at: section.id)
+      codexViewModel.removeFolder(at: section.id)
     }
   }
 
@@ -1189,7 +1281,8 @@ public struct MultiProviderSessionsListView: View {
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
     return repositories.contains { repository in
       repository.worktrees.contains { worktree in
-        worktree.isWorktree && WorktreeModuleResolver.normalizedDirectoryPath(worktree.path) == normalizedPath
+        worktree.isWorktree
+          && WorktreeModuleResolver.normalizedDirectoryPath(worktree.path) == normalizedPath
       }
     }
   }
@@ -1318,81 +1411,113 @@ public struct MultiProviderSessionsListView: View {
         let sections = groupedSelectedSessionSections(from: allItems)
         if !sections.isEmpty {
           ForEach(sections) { section in
-            ForEach(section.groups) { group in
-              let isExpanded = !collapsedProjectGroups.contains(group.id)
-              let groupWorkspaces = workspaceViewModel.workspaces(for: group.id)
-              let worktreeModule = worktreeModule(for: group.id)
-              let worktreeSessionCount = worktreeModule == nil
-                ? 0
-                : group.items.filter { !$0.isPending }.count
-
-              ProjectGroupHeader(
-                name: group.displayName,
-                isExpanded: isExpanded,
-                canToggle: !group.items.isEmpty || !groupWorkspaces.isEmpty,
-                isSelected: selectedModuleLandingPath == group.id && group.items.isEmpty && groupWorkspaces.isEmpty,
+            let isFolderExpanded = !collapsedFolderGroups.contains(section.id)
+            if section.isFolderGroup {
+              FolderGroupHeader(
+                name: section.displayName,
+                itemCount: orderedTrackedRepos.filter {
+                  SessionFolderDiscovery.isDirectChild($0.path, of: section.id)
+                }.count,
+                isExpanded: isFolderExpanded,
                 onToggle: {
-                  withAnimation(.easeInOut(duration: 0.25)) {
-                    if isExpanded {
-                      collapsedProjectGroups.insert(group.id)
+                  withAnimation(.easeInOut(duration: 0.2)) {
+                    if isFolderExpanded {
+                      collapsedFolderGroups.insert(section.id)
                     } else {
-                      collapsedProjectGroups.remove(group.id)
+                      collapsedFolderGroups.remove(section.id)
                     }
                   }
                 },
-                onSelectEmptyModule: {
-                  selectEmptyModule(group.id)
-                },
-                repoPath: group.id,
-                onStartSession: {
-                  triggerNewSessionFlow(preferredRepositoryPath: group.id)
-                },
-                onCreateWorkspace: {
-                  createWorkspace(projectPath: group.id)
-                },
-                onOpenInFinder: {
-                  NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: group.id)
-                },
-                onOpenGitHub: {
-                  gitHubSheetItem = GitHubSheetItem(projectPath: group.id)
-                },
-                onArchiveSessions: group.items.isEmpty ? nil : {
-                  let items = group.items
-                  archiveConfirmation = ArchiveConfirmation(
-                    repoName: group.displayName,
-                    count: items.count
-                  ) {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                      for item in items where !item.isPending {
-                        switch item.providerKind {
-                        case .claude: claudeViewModel.stopMonitoring(session: item.session)
-                        case .codex: codexViewModel.stopMonitoring(session: item.session)
+                onRemove: { requestFolderRemoval(section) }
+              )
+            }
+
+            if !section.isFolderGroup || isFolderExpanded {
+              ForEach(section.groups) { group in
+                let isExpanded = !collapsedProjectGroups.contains(group.id)
+                let groupWorkspaces = workspaceViewModel.workspaces(for: group.id)
+                let worktreeModule = worktreeModule(for: group.id)
+                let worktreeSessionCount =
+                  worktreeModule == nil
+                  ? 0
+                  : group.items.filter { !$0.isPending }.count
+
+                VStack(alignment: .leading, spacing: 0) {
+                  ProjectGroupHeader(
+                    name: group.displayName,
+                    isExpanded: isExpanded,
+                    canToggle: !group.items.isEmpty || !groupWorkspaces.isEmpty,
+                    isSelected: selectedModuleLandingPath == group.id && group.items.isEmpty
+                      && groupWorkspaces.isEmpty,
+                    onToggle: {
+                      withAnimation(.easeInOut(duration: 0.25)) {
+                        if isExpanded {
+                          collapsedProjectGroups.insert(group.id)
+                        } else {
+                          collapsedProjectGroups.remove(group.id)
                         }
                       }
+                    },
+                    onSelectEmptyModule: {
+                      selectEmptyModule(group.id)
+                    },
+                    repoPath: group.id,
+                    onStartSession: {
+                      triggerNewSessionFlow(preferredRepositoryPath: group.id)
+                    },
+                    onCreateWorkspace: {
+                      createWorkspace(projectPath: group.id)
+                    },
+                    onOpenInFinder: {
+                      NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: group.id)
+                    },
+                    onOpenGitHub: {
+                      gitHubSheetItem = GitHubSheetItem(projectPath: group.id)
+                    },
+                    onArchiveSessions: group.items.isEmpty
+                      ? nil
+                      : {
+                        let items = group.items
+                        archiveConfirmation = ArchiveConfirmation(
+                          repoName: group.displayName,
+                          count: items.count
+                        ) {
+                          withAnimation(.easeInOut(duration: 0.25)) {
+                            for item in items where !item.isPending {
+                              switch item.providerKind {
+                              case .claude: claudeViewModel.stopMonitoring(session: item.session)
+                              case .codex: codexViewModel.stopMonitoring(session: item.session)
+                              }
+                            }
+                          }
+                        }
+                      },
+                    removeTitle: worktreeModule == nil ? "Remove" : "Remove from AgentHub",
+                    onRemove: section.isFolderGroup
+                      ? nil
+                      : removeAction(
+                        for: group,
+                        worktreeModule: worktreeModule,
+                        worktreeSessionCount: worktreeSessionCount
+                      ),
+                    onDeleteWorktree: worktreeModule.map { worktree in
+                      {
+                        worktreeModuleDeleteConfirmation = WorktreeModuleDeleteConfirmation(
+                          worktree: worktree,
+                          displayName: group.displayName,
+                          sessionCount: worktreeSessionCount,
+                          providerKind: providerKindForWorktreeModule(worktree, items: group.items)
+                        )
+                      }
                     }
-                  }
-                },
-                removeTitle: worktreeModule == nil ? "Remove" : "Remove from AgentHub",
-                onRemove: removeAction(
-                  for: group,
-                  worktreeModule: worktreeModule,
-                  worktreeSessionCount: worktreeSessionCount
-                ),
-                onDeleteWorktree: worktreeModule.map { worktree in
-                  {
-                    worktreeModuleDeleteConfirmation = WorktreeModuleDeleteConfirmation(
-                      worktree: worktree,
-                      displayName: group.displayName,
-                      sessionCount: worktreeSessionCount,
-                      providerKind: providerKindForWorktreeModule(worktree, items: group.items)
-                    )
+                  )
+
+                  if isExpanded {
+                    workspaceRows(for: groupWorkspaces, ownedItems: workspaceOwnedItems)
+                    sessionRows(for: group.items.filter { !isWorkspaceOwned($0) })
                   }
                 }
-              )
-
-              if isExpanded {
-                workspaceRows(for: groupWorkspaces, ownedItems: workspaceOwnedItems)
-                sessionRows(for: group.items.filter { !isWorkspaceOwned($0) })
+                .padding(.leading, section.isFolderGroup ? 14 : 0)
               }
             }
 
@@ -1464,21 +1589,22 @@ public struct MultiProviderSessionsListView: View {
   }
 
   private func isWorkspaceOwned(_ item: SelectedSessionItem) -> Bool {
-    !item.isPending && workspaceViewModel.workspaceID(
-      owningSession: item.session.id,
-      provider: item.providerKind
-    ) != nil
+    !item.isPending
+      && workspaceViewModel.workspaceID(
+        owningSession: item.session.id,
+        provider: item.providerKind
+      ) != nil
   }
 
   /// Workspace-owned sessions render as nested rows with a prefixed scroll ID;
   /// expand their group so the scroll target exists.
   private func resolvedScrollTargetID(for itemID: String) -> String {
     guard let item = selectedSessionItems.first(where: { $0.id == itemID }),
-          !item.isPending,
-          let workspaceID = workspaceViewModel.workspaceID(
-            owningSession: item.session.id,
-            provider: item.providerKind
-          )
+      !item.isPending,
+      let workspaceID = workspaceViewModel.workspaceID(
+        owningSession: item.session.id,
+        provider: item.providerKind
+      )
     else { return itemID }
     expandedWorkspaceSessionGroups.insert(workspaceID)
     return "workspace-session-\(itemID)"
@@ -1499,15 +1625,17 @@ public struct MultiProviderSessionsListView: View {
           viewModel: workspaceViewModel,
           isSelected: workspace.id == selectedWorkspaceID,
           isSessionsExpanded: isSessionsExpanded,
-          onToggleSessions: sessionItems.isEmpty ? nil : {
-            withAnimation(.easeInOut(duration: 0.25)) {
-              if isSessionsExpanded {
-                expandedWorkspaceSessionGroups.remove(workspace.id)
-              } else {
-                expandedWorkspaceSessionGroups.insert(workspace.id)
+          onToggleSessions: sessionItems.isEmpty
+            ? nil
+            : {
+              withAnimation(.easeInOut(duration: 0.25)) {
+                if isSessionsExpanded {
+                  expandedWorkspaceSessionGroups.remove(workspace.id)
+                } else {
+                  expandedWorkspaceSessionGroups.insert(workspace.id)
+                }
               }
-            }
-          },
+            },
           onSelect: {
             selectedModuleLandingPath = nil
             primarySessionId = nil
@@ -1602,22 +1730,26 @@ public struct MultiProviderSessionsListView: View {
       linkedPullRequests: item.linkedPullRequests,
       colorScheme: colorScheme,
       isPinned: isPinned(item),
-      onPin: item.isPending ? nil : {
-        withAnimation(.easeInOut(duration: 0.3)) {
-          switch item.providerKind {
-          case .claude: claudeViewModel.togglePin(for: item.session)
-          case .codex: codexViewModel.togglePin(for: item.session)
+      onPin: item.isPending
+        ? nil
+        : {
+          withAnimation(.easeInOut(duration: 0.3)) {
+            switch item.providerKind {
+            case .claude: claudeViewModel.togglePin(for: item.session)
+            case .codex: codexViewModel.togglePin(for: item.session)
+            }
           }
-        }
-      },
-      onArchive: item.isPending ? nil : {
-        withAnimation(.easeInOut(duration: 0.25)) {
-          switch item.providerKind {
-          case .claude: claudeViewModel.stopMonitoring(session: item.session)
-          case .codex: codexViewModel.stopMonitoring(session: item.session)
+        },
+      onArchive: item.isPending
+        ? nil
+        : {
+          withAnimation(.easeInOut(duration: 0.25)) {
+            switch item.providerKind {
+            case .claude: claudeViewModel.stopMonitoring(session: item.session)
+            case .codex: codexViewModel.stopMonitoring(session: item.session)
+            }
           }
-        }
-      },
+        },
       onSelect: {
         selectedWorkspaceID = nil
         selectedModuleLandingPath = nil
@@ -1679,11 +1811,13 @@ public struct MultiProviderSessionsListView: View {
       .buttonStyle(.plain)
       .help("About Browse all Sessions")
       .popover(isPresented: $showBrowseInfo, arrowEdge: isBrowseExpanded ? .bottom : .top) {
-        Text("Find all local Claude and Codex sessions started from the terminal and bring them into AgentHub.")
-          .font(.callout)
-          .foregroundColor(.secondary)
-          .padding(12)
-          .frame(width: 240)
+        Text(
+          "Find all local Claude and Codex sessions started from the terminal and bring them into AgentHub."
+        )
+        .font(.callout)
+        .foregroundColor(.secondary)
+        .padding(12)
+        .frame(width: 240)
       }
     }
   }
@@ -1806,17 +1940,22 @@ public struct MultiProviderSessionsListView: View {
 
       HStack {
         let moduleCount = displayModuleCount(for: currentViewModel)
-        Text("\(moduleCount) \(moduleCount == 1 ? "module" : "modules") · \(currentViewModel.allSessions.count) \(currentViewModel.allSessions.count == 1 ? "session" : "sessions")")
-          .font(.secondaryCaption)
-          .foregroundColor(.secondary)
+        Text(
+          "\(moduleCount) \(moduleCount == 1 ? "module" : "modules") · \(currentViewModel.allSessions.count) \(currentViewModel.allSessions.count == 1 ? "session" : "sessions")"
+        )
+        .font(.secondaryCaption)
+        .foregroundColor(.secondary)
 
         Spacer()
 
         // Toggle first/last message
         Button(action: { toggleShowLastMessage() }) {
           HStack(spacing: 6) {
-            Image(systemName: currentViewModel.showLastMessage ? "arrow.down.to.line" : "arrow.up.to.line")
-              .font(.system(size: DesignTokens.IconSize.sm))
+            Image(
+              systemName: currentViewModel.showLastMessage
+                ? "arrow.down.to.line" : "arrow.up.to.line"
+            )
+            .font(.system(size: DesignTokens.IconSize.sm))
             Text(currentViewModel.showLastMessage ? "Last" : "First")
               .font(.secondaryCaption)
           }
@@ -1865,8 +2004,8 @@ public struct MultiProviderSessionsListView: View {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
       MainActor.assumeIsolated {
         let panel = NSOpenPanel()
-        panel.title = "Select Repository"
-        panel.message = "Choose a git repository to monitor CLI sessions"
+        panel.title = "Add Sessions Folder"
+        panel.message = "Choose a repository or a folder containing projects"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -1882,15 +2021,15 @@ public struct MultiProviderSessionsListView: View {
   private func addRepository(at path: String) {
     sidebarGroupMode = .repo
     trackPendingModule(path)
-    claudeViewModel.addRepository(at: path)
-    codexViewModel.addRepository(at: path)
-    selectEmptyModule(path)
+    claudeViewModel.addFolder(at: path)
+    codexViewModel.addFolder(at: path)
   }
 
   private func openSessionFile(for session: CLISession, viewModel: CLISessionsViewModel) {
     guard let fileURL = viewModel.sessionFileURL(for: session),
-          let data = FileManager.default.contents(atPath: fileURL.path),
-          let content = String(data: data, encoding: .utf8) else {
+      let data = FileManager.default.contents(atPath: fileURL.path),
+      let content = String(data: data, encoding: .utf8)
+    else {
       return
     }
 
@@ -1903,7 +2042,9 @@ public struct MultiProviderSessionsListView: View {
     }
   }
 
-  private func handleSearchSelection(_ result: SessionSearchResult, for viewModel: CLISessionsViewModel) {
+  private func handleSearchSelection(
+    _ result: SessionSearchResult, for viewModel: CLISessionsViewModel
+  ) {
     viewModel.selectSearchResult(result)
     let otherViewModel = viewModel.providerKind == .claude ? codexViewModel : claudeViewModel
     if !otherViewModel.selectedRepositories.contains(where: { $0.path == result.projectPath }) {
@@ -1973,7 +2114,9 @@ public struct MultiProviderSessionsListView: View {
 
   /// Memoized: this runs for every session on every rebuild of
   /// `selectedSessionItems`, which SwiftUI drives from monitor-state publishes.
-  private static func pullRequestReferences(in links: [ResourceLink]) -> [GitHubPullRequestURLReference] {
+  private static func pullRequestReferences(in links: [ResourceLink])
+    -> [GitHubPullRequestURLReference]
+  {
     GitHubPullRequestURLReferenceCache.references(in: links.map(\.url))
   }
 
@@ -2004,7 +2147,8 @@ public struct MultiProviderSessionsListView: View {
   /// refresh itself is already a no-op when there is nothing to refresh.
   private var canRefreshGitHubStates: Bool {
     gitHubPRObservationService != nil
-      && !(claudeViewModel.monitoredSessionIds.isEmpty && codexViewModel.monitoredSessionIds.isEmpty)
+      && !(claudeViewModel.monitoredSessionIds.isEmpty
+        && codexViewModel.monitoredSessionIds.isEmpty)
   }
 
   private var hasCurrentProviderRepositories: Bool {
@@ -2021,7 +2165,8 @@ public struct MultiProviderSessionsListView: View {
 
   private func scheduleInitialGitHubStateRefreshIfNeeded() {
     guard !didScheduleInitialGitHubStateRefresh,
-          canRefreshGitHubStates else {
+      canRefreshGitHubStates
+    else {
       return
     }
 
@@ -2035,7 +2180,8 @@ public struct MultiProviderSessionsListView: View {
 
   private func scheduleGitHubStateRefresh(limit: Int?, showsIndicator: Bool) {
     guard !isRefreshingGitHubStates,
-          let observationService = gitHubPRObservationService else {
+      let observationService = gitHubPRObservationService
+    else {
       return
     }
 
@@ -2067,9 +2213,12 @@ public struct MultiProviderSessionsListView: View {
     guard currentPrimary.hasPrefix(providerPrefix) else { return }
     let uuidString = String(currentPrimary.dropFirst(providerPrefix.count))
     guard let pendingUUID = UUID(uuidString: uuidString),
-          let realSessionId = resolutions[pendingUUID] else { return }
+      let realSessionId = resolutions[pendingUUID]
+    else { return }
     let newPrimaryId = "\(provider.rawValue.lowercased())-\(realSessionId)"
-    AppLogger.session.info("[PrimarySelection] Resolved: \(currentPrimary.prefix(20), privacy: .public) -> \(newPrimaryId.prefix(20), privacy: .public)")
+    AppLogger.session.info(
+      "[PrimarySelection] Resolved: \(currentPrimary.prefix(20), privacy: .public) -> \(newPrimaryId.prefix(20), privacy: .public)"
+    )
     primarySessionId = newPrimaryId
     viewModel.resolvedPendingSessions.removeValue(forKey: pendingUUID)
   }
@@ -2098,7 +2247,8 @@ public struct MultiProviderSessionsListView: View {
 
   private func consumeGlobalSessionSelectionIfNeeded() {
     guard let router = agentHub?.globalSessionSelectionRouter,
-          let request = router.selectionRequest else {
+      let request = router.selectionRequest
+    else {
       return
     }
 
@@ -2109,11 +2259,12 @@ public struct MultiProviderSessionsListView: View {
     selectedModuleLandingPath = nil
     selectedProviderRaw = request.providerKind.rawValue
     if !item.isPending,
-       let workspaceID = workspaceViewModel.focusWorkspaceSession(
-         provider: item.providerKind,
-         sessionId: item.session.id,
-         isDark: colorScheme == .dark
-       ) {
+      let workspaceID = workspaceViewModel.focusWorkspaceSession(
+        provider: item.providerKind,
+        sessionId: item.session.id,
+        isDark: colorScheme == .dark
+      )
+    {
       // Workspace-owned sessions open inside their workspace pane.
       primarySessionId = nil
       selectedWorkspaceID = workspaceID
@@ -2136,7 +2287,8 @@ public struct MultiProviderSessionsListView: View {
   /// - Parameter items: See `ensurePrimarySelection(items:)`.
   private func syncModuleLandingSelection(items prebuiltItems: [SelectedSessionItem]? = nil) {
     if let selectedModuleLandingPath,
-       pendingModulePaths.contains(selectedModuleLandingPath) {
+      pendingModulePaths.contains(selectedModuleLandingPath)
+    {
       return
     }
 
@@ -2154,7 +2306,8 @@ public struct MultiProviderSessionsListView: View {
 
   private func trackPendingModule(_ path: String) {
     guard !orderedTrackedRepos.contains(where: { $0.path == path }),
-          !pendingAddedModulePaths.contains(path) else {
+      !pendingAddedModulePaths.contains(path)
+    else {
       return
     }
     pendingAddedModulePaths.insert(path, at: 0)
@@ -2162,14 +2315,18 @@ public struct MultiProviderSessionsListView: View {
 
   private func syncPendingModuleRows() {
     let trackedPaths = Set(orderedTrackedRepos.map(\.path))
-    pendingAddedModulePaths.removeAll { trackedPaths.contains($0) }
+    let folderPaths = Set(orderedSelectedFolderPaths)
+    pendingAddedModulePaths.removeAll {
+      trackedPaths.contains($0) || folderPaths.contains($0)
+    }
   }
 
   private var pendingModulePaths: [String] {
     let trackedPaths = Set(orderedTrackedRepos.map(\.path))
+    let folderPaths = Set(orderedSelectedFolderPaths)
     var seen: Set<String> = []
     return pendingAddedModulePaths.filter { path in
-      !trackedPaths.contains(path) && seen.insert(path).inserted
+      !trackedPaths.contains(path) && !folderPaths.contains(path) && seen.insert(path).inserted
     }
   }
 
@@ -2238,11 +2395,12 @@ public struct MultiProviderSessionsListView: View {
       if let item = selectedSessionItems.first(where: { $0.id == id }) {
         selectedModuleLandingPath = nil
         if !item.isPending,
-           let workspaceID = workspaceViewModel.focusWorkspaceSession(
-             provider: item.providerKind,
-             sessionId: item.session.id,
-             isDark: colorScheme == .dark
-           ) {
+          let workspaceID = workspaceViewModel.focusWorkspaceSession(
+            provider: item.providerKind,
+            sessionId: item.session.id,
+            isDark: colorScheme == .dark
+          )
+        {
           // Workspace-owned sessions open inside their workspace pane.
           primarySessionId = nil
           selectedWorkspaceID = workspaceID
@@ -2269,10 +2427,12 @@ public struct MultiProviderSessionsListView: View {
   }
 
   private func handleEmbeddedSidePanelVisibilityChange(_ isVisible: Bool) {
-    guard let nextVisibility = embeddedSidePanelSidebarVisibility.columnVisibilityChange(
-      forEmbeddedSidePanelVisible: isVisible,
-      currentColumnVisibility: columnVisibility
-    ) else { return }
+    guard
+      let nextVisibility = embeddedSidePanelSidebarVisibility.columnVisibilityChange(
+        forEmbeddedSidePanelVisible: isVisible,
+        currentColumnVisibility: columnVisibility
+      )
+    else { return }
 
     columnVisibility = nextVisibility
   }
@@ -2315,7 +2475,8 @@ public struct MultiProviderSessionsListView: View {
   }
 
   private func createWorkspaceInFocusedProject() {
-    let selectedWorkspacePath = selectedWorkspaceID
+    let selectedWorkspacePath =
+      selectedWorkspaceID
       .flatMap { workspaceViewModel.workspace(id: $0) }?
       .projectPath
     guard let projectPath = selectedWorkspacePath ?? focusedSessionLaunchPath else { return }
@@ -2324,7 +2485,8 @@ public struct MultiProviderSessionsListView: View {
 
   private func createWorkspace(projectPath: String) {
     Task {
-      guard let workspaceID = await workspaceViewModel.createWorkspace(projectPath: projectPath) else {
+      guard let workspaceID = await workspaceViewModel.createWorkspace(projectPath: projectPath)
+      else {
         return
       }
       selectedModuleLandingPath = nil
@@ -2442,16 +2604,19 @@ public struct MultiProviderSessionsListView: View {
   }
 
   private var auxiliaryShellToggleAnimation: Animation {
-    accessibilityReduceMotion ? .easeInOut(duration: 0.12) : .spring(response: 0.28, dampingFraction: 0.9)
+    accessibilityReduceMotion
+      ? .easeInOut(duration: 0.12) : .spring(response: 0.28, dampingFraction: 0.9)
   }
 
   private func navigateSessionHistory(direction: SidebarSessionNavigationDirection) {
     let orderedIDs = navigableSessionItems.map(\.id)
-    guard let nextID = SidebarSessionOrdering.nextID(
-      in: orderedIDs,
-      currentID: primarySessionId,
-      direction: direction
-    ) else {
+    guard
+      let nextID = SidebarSessionOrdering.nextID(
+        in: orderedIDs,
+        currentID: primarySessionId,
+        direction: direction
+      )
+    else {
       return
     }
 
@@ -2468,7 +2633,7 @@ public struct MultiProviderSessionsListView: View {
   /// group — and only then asks for the scroll.
   private func revealPrimarySessionInSidebar() {
     guard let targetID = primarySessionId,
-          let item = selectedSessionItems.first(where: { $0.id == targetID })
+      let item = selectedSessionItems.first(where: { $0.id == targetID })
     else { return }
 
     var didReveal = false
@@ -2540,9 +2705,10 @@ private struct PendingModuleRow: View {
     .padding(.horizontal, 4)
     .background(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .fill(isSelected
-              ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
-              : Color.clear)
+        .fill(
+          isSelected
+            ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
+            : Color.clear)
     )
     .padding(.top, 2)
     .accessibilityElement(children: .combine)
@@ -2558,6 +2724,61 @@ private struct RepositoryModuleSectionDivider: View {
       .fill(Color.borderSubtle.opacity(0.9))
       .frame(height: 1)
       .padding(.vertical, 8)
+  }
+}
+
+// MARK: - ProjectGroupHeader
+
+private struct FolderGroupHeader: View {
+  let name: String
+  let itemCount: Int
+  let isExpanded: Bool
+  let onToggle: () -> Void
+  let onRemove: () -> Void
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Button(action: onToggle) {
+        HStack(spacing: 7) {
+          Image(systemName: "chevron.right")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+
+          Image(systemName: isExpanded ? "folder.fill" : "folder")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.primary)
+
+          Text(name)
+            .font(Font.geist(size: 13, weight: .semibold))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+
+          Text("\(itemCount)")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+
+      Spacer(minLength: 0)
+
+      Button(action: onRemove) {
+        Image(systemName: "xmark.circle")
+          .font(.system(size: 12))
+          .foregroundStyle(.secondary)
+          .frame(width: 22, height: 22)
+      }
+      .buttonStyle(.plain)
+      .help("Remove folder")
+    }
+    .padding(.top, 8)
+    .padding(.horizontal, 4)
+    .padding(.bottom, 3)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(name), \(itemCount) project folders")
+    .accessibilityAction(named: isExpanded ? "Collapse" : "Expand", onToggle)
   }
 }
 
@@ -2652,9 +2873,10 @@ private struct ProjectGroupHeader: View {
     .padding(.horizontal, 4)
     .background(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .fill(isSelected || isHovered
-              ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
-              : Color.clear)
+        .fill(
+          isSelected || isHovered
+            ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
+            : Color.clear)
     )
     .padding(.top, 2)
     .contentShape(Rectangle())
@@ -2700,9 +2922,10 @@ private struct PinnedSectionHeader: View {
     .padding(.horizontal, 4)
     .background(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .fill(isHovered
-              ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
-              : Color.clear)
+        .fill(
+          isHovered
+            ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
+            : Color.clear)
     )
     .padding(.top, 2)
     .contentShape(Rectangle())
@@ -2747,9 +2970,10 @@ private struct StatusGroupSectionHeader: View {
     .padding(.horizontal, 4)
     .background(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .fill(isHovered
-              ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
-              : Color.clear)
+        .fill(
+          isHovered
+            ? Color.brandPrimary.opacity(colorScheme == .dark ? 0.12 : 0.1)
+            : Color.clear)
     )
     .contentShape(Rectangle())
     .onHover { isHovered = $0 }
@@ -2923,8 +3147,8 @@ private struct GroupByPopover: View {
 /// Shared styling for small icon buttons/menus used in sidebar section headers.
 /// Keeps the hit area generous (28×28) while the glyph size is tunable so
 /// in-row controls can be visually smaller without losing tap area.
-private extension View {
-  func headerIconStyle(size: CGFloat = DesignTokens.IconSize.sm) -> some View {
+extension View {
+  fileprivate func headerIconStyle(size: CGFloat = DesignTokens.IconSize.sm) -> some View {
     self
       .font(.system(size: size))
       .foregroundColor(.secondary)
@@ -3042,13 +3266,16 @@ private func filterJSONLContent(_ content: String) -> String {
     if trimmed.isEmpty { continue }
 
     guard let data = trimmed.data(using: .utf8) else { continue }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      continue
+    }
     guard let type = json["type"] as? String else { continue }
 
     // Codex format: event_msg with payload.type user_message/agent_message
     if type == "event_msg" {
       guard let payload = json["payload"] as? [String: Any],
-            let eventType = payload["type"] as? String else { continue }
+        let eventType = payload["type"] as? String
+      else { continue }
 
       if eventType == "user_message" || eventType == "agent_message" {
         let role = eventType == "user_message" ? "user" : "assistant"
@@ -3130,7 +3357,8 @@ private func filterJSONLContent(_ content: String) -> String {
   }
 
   if result.isEmpty {
-    return "[No conversation content found - this session may only contain file history snapshots or tool results]"
+    return
+      "[No conversation content found - this session may only contain file history snapshots or tool results]"
   }
 
   return result.joined(separator: "\n\n")
@@ -3186,8 +3414,10 @@ private struct SessionFileSheetView: View {
         overflowMode: $overflowMode
       )
     }
-    .frame(minWidth: 900, idealWidth: 1100, maxWidth: .infinity,
-           minHeight: 700, idealHeight: 900, maxHeight: .infinity)
+    .frame(
+      minWidth: 900, idealWidth: 1100, maxWidth: .infinity,
+      minHeight: 700, idealHeight: 900, maxHeight: .infinity
+    )
     .onKeyPress(.escape) {
       onDismiss()
       return .handled

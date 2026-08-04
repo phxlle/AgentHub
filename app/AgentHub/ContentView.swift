@@ -17,7 +17,7 @@ struct ContentView: View {
   @State private var provider = AgentHubProvider()
 
   var body: some View {
-    AgentHubSessionsView()
+    AgentHubOperationsView()
       .agentHub(provider)
   }
 }

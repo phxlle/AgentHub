@@ -382,6 +382,30 @@ struct AuxiliaryShellTerminalManagementTests {
     #expect(viewModel.consumePendingPrompt(for: session.id) == nil)
   }
 
+  @Test("Automated Claude sessions receive their prompt at process launch")
+  @MainActor
+  func automatedClaudeSessionLaunchIncludesPrompt() throws {
+    let terminal = TestTerminalSurface()
+    let factory = RecordingTerminalSurfaceFactory(surfaces: [terminal])
+    let viewModel = makeAuxiliaryShellViewModel(
+      terminalSurfaceFactory: factory,
+      terminalBackend: .regular,
+    )
+    let prompt = "Review the current working tree without editing files."
+
+    let pendingID = try #require(
+      viewModel.startAutomatedSessionInHub(
+        WorktreeBranch(name: "main", path: "/tmp/reviewer-launch", isWorktree: false),
+        initialPrompt: prompt,
+      )
+    )
+
+    #expect(terminal.configuredInitialPrompt == prompt)
+    #expect(viewModel.pendingTerminalPrompts["pending-\(pendingID.uuidString)"] == nil)
+    let pending = try #require(viewModel.pendingHubSessions.first { $0.id == pendingID })
+    viewModel.cancelPendingSession(pending)
+  }
+
   @Test("Real session terminal launch does not embed follow-up prompt")
   @MainActor
   func realSessionTerminalLaunchDoesNotEmbedFollowUpPrompt() {

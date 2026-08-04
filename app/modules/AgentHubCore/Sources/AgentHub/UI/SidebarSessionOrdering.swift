@@ -47,6 +47,19 @@ struct SidebarRepositoryModuleSection<Item>: Identifiable {
   let id: String
   let displayName: String
   let groups: [SidebarSessionGroup<Item>]
+  let isFolderGroup: Bool
+
+  init(
+    id: String,
+    displayName: String,
+    groups: [SidebarSessionGroup<Item>],
+    isFolderGroup: Bool = false
+  ) {
+    self.id = id
+    self.displayName = displayName
+    self.groups = groups
+    self.isFolderGroup = isFolderGroup
+  }
 }
 
 enum SidebarSessionOrdering {
@@ -68,7 +81,7 @@ enum SidebarSessionOrdering {
       .filter(isPinned)
       .sorted { lhs, rhs in
         switch (manualOrder(lhs), manualOrder(rhs)) {
-        case let (lhsIndex?, rhsIndex?):
+        case (let lhsIndex?, let rhsIndex?):
           if lhsIndex != rhsIndex { return lhsIndex < rhsIndex }
           return orderedByActivity(lhs, rhs, timestamp: timestamp, id: id)
         case (.some, .none):
@@ -105,12 +118,15 @@ enum SidebarSessionOrdering {
     var groups: [SidebarSessionGroup<Item>] = []
     var handledKeys: Set<String> = []
 
-    for modulePath in WorktreeModuleResolver.modulePaths(for: repositories, mode: worktreeDisplayMode) {
-      groups.append(SidebarSessionGroup(
-        id: modulePath,
-        displayName: URL(fileURLWithPath: modulePath).lastPathComponent,
-        items: sortedByActivity(itemsByModule[modulePath] ?? [], timestamp: timestamp, id: id)
-      ))
+    for modulePath in WorktreeModuleResolver.modulePaths(
+      for: repositories, mode: worktreeDisplayMode)
+    {
+      groups.append(
+        SidebarSessionGroup(
+          id: modulePath,
+          displayName: URL(fileURLWithPath: modulePath).lastPathComponent,
+          items: sortedByActivity(itemsByModule[modulePath] ?? [], timestamp: timestamp, id: id)
+        ))
       handledKeys.insert(modulePath)
     }
 
@@ -119,11 +135,12 @@ enum SidebarSessionOrdering {
       .sorted()
 
     for key in orphanKeys {
-      groups.append(SidebarSessionGroup(
-        id: key,
-        displayName: URL(fileURLWithPath: key).lastPathComponent,
-        items: sortedByActivity(itemsByModule[key] ?? [], timestamp: timestamp, id: id)
-      ))
+      groups.append(
+        SidebarSessionGroup(
+          id: key,
+          displayName: URL(fileURLWithPath: key).lastPathComponent,
+          items: sortedByActivity(itemsByModule[key] ?? [], timestamp: timestamp, id: id)
+        ))
     }
 
     return groups
@@ -132,6 +149,7 @@ enum SidebarSessionOrdering {
   static func repositoryModuleSections<Item>(
     from items: [Item],
     repositories: [SelectedRepository],
+    selectedFolderPaths: [String] = [],
     worktreeDisplayMode: WorktreeDisplayMode,
     isPinned: (Item) -> Bool,
     projectPath: (Item) -> String,
@@ -151,8 +169,42 @@ enum SidebarSessionOrdering {
     var handledGroupIDs: Set<String> = []
     var sections: [SidebarRepositoryModuleSection<Item>] = []
 
-    for repository in WorktreeModuleResolver.mergedRepositories(repositories) {
+    let mergedRepositories = WorktreeModuleResolver.mergedRepositories(repositories)
+    var handledRepositoryPaths: Set<String> = []
+
+    for folderPath in selectedFolderPaths {
+      let normalizedFolderPath = WorktreeModuleResolver.normalizedDirectoryPath(folderPath)
+      let childRepositories = mergedRepositories.filter {
+        SessionFolderDiscovery.isDirectChild($0.path, of: normalizedFolderPath)
+      }.sorted {
+        $0.name.localizedStandardCompare($1.name) == .orderedAscending
+      }
+      var folderGroups: [SidebarSessionGroup<Item>] = []
+
+      for repository in childRepositories {
+        let repositoryPath = WorktreeModuleResolver.normalizedDirectoryPath(repository.path)
+        handledRepositoryPaths.insert(repositoryPath)
+        let modulePaths = WorktreeModuleResolver.modulePaths(
+          for: [repository],
+          mode: worktreeDisplayMode
+        )
+        let repositoryGroups = modulePaths.compactMap { groupsByID[$0] }
+        folderGroups.append(contentsOf: repositoryGroups)
+        handledGroupIDs.formUnion(repositoryGroups.map(\.id))
+      }
+
+      sections.append(
+        SidebarRepositoryModuleSection(
+          id: normalizedFolderPath,
+          displayName: URL(fileURLWithPath: normalizedFolderPath).lastPathComponent,
+          groups: folderGroups,
+          isFolderGroup: true
+        ))
+    }
+
+    for repository in mergedRepositories {
       let repositoryPath = WorktreeModuleResolver.normalizedDirectoryPath(repository.path)
+      guard !handledRepositoryPaths.contains(repositoryPath) else { continue }
       let modulePaths = WorktreeModuleResolver.modulePaths(
         for: [repository],
         mode: worktreeDisplayMode
@@ -161,20 +213,22 @@ enum SidebarSessionOrdering {
       guard !sectionGroups.isEmpty else { continue }
 
       handledGroupIDs.formUnion(sectionGroups.map(\.id))
-      sections.append(SidebarRepositoryModuleSection(
-        id: repositoryPath,
-        displayName: URL(fileURLWithPath: repositoryPath).lastPathComponent,
-        groups: sectionGroups
-      ))
+      sections.append(
+        SidebarRepositoryModuleSection(
+          id: repositoryPath,
+          displayName: URL(fileURLWithPath: repositoryPath).lastPathComponent,
+          groups: sectionGroups
+        ))
     }
 
     let orphanGroups = groups.filter { !handledGroupIDs.contains($0.id) }
     for group in orphanGroups {
-      sections.append(SidebarRepositoryModuleSection(
-        id: group.id,
-        displayName: group.displayName,
-        groups: [group]
-      ))
+      sections.append(
+        SidebarRepositoryModuleSection(
+          id: group.id,
+          displayName: group.displayName,
+          groups: [group]
+        ))
     }
 
     return sections
@@ -219,13 +273,14 @@ enum SidebarSessionOrdering {
     var result: [Item] = []
 
     if !isPinnedSectionCollapsed {
-      result.append(contentsOf: pinnedItems(
-        from: items,
-        isPinned: isPinned,
-        timestamp: timestamp,
-        id: id,
-        manualOrder: manualOrder
-      ))
+      result.append(
+        contentsOf: pinnedItems(
+          from: items,
+          isPinned: isPinned,
+          timestamp: timestamp,
+          id: id,
+          manualOrder: manualOrder
+        ))
     }
 
     switch groupMode {
@@ -273,8 +328,8 @@ enum SidebarSessionOrdering {
     placement: PinnedSessionDropPlacement
   ) -> [String]? {
     guard movingID != targetID,
-          ids.contains(movingID),
-          ids.contains(targetID)
+      ids.contains(movingID),
+      ids.contains(targetID)
     else { return nil }
 
     let remainingIDs = ids.filter { $0 != movingID }
@@ -296,7 +351,8 @@ enum SidebarSessionOrdering {
   ) -> String? {
     guard !orderedIDs.isEmpty else { return nil }
     guard let currentID,
-          let currentIndex = orderedIDs.firstIndex(of: currentID) else {
+      let currentIndex = orderedIDs.firstIndex(of: currentID)
+    else {
       return orderedIDs.first
     }
 

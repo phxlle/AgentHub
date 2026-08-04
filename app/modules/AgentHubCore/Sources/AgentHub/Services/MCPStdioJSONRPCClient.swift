@@ -19,6 +19,7 @@ public final class MCPStdioJSONRPCClient: MCPJSONRPCClientProtocol, @unchecked S
   private let lifecycleLock = NSLock()
   private var nextID = 1
   private var isClosed = false
+  private var stdoutReadDescriptor: Int32 = -1
 
   public init(config: MCPServerConfiguration, requestTimeoutSeconds: TimeInterval) {
     self.config = config
@@ -51,11 +52,23 @@ public final class MCPStdioJSONRPCClient: MCPJSONRPCClientProtocol, @unchecked S
       _ = handle.availableData
     }
 
+    let readDescriptor = Darwin.dup(stdoutPipe.fileHandleForReading.fileDescriptor)
+    guard readDescriptor >= 0 else {
+      throw MCPAppDiscoveryError.processLaunchFailed(
+        "Could not duplicate the stdio output descriptor: \(posixErrorDescription())"
+      )
+    }
+
     do {
       try process.run()
     } catch {
+      Darwin.close(readDescriptor)
       throw MCPAppDiscoveryError.processLaunchFailed(error.localizedDescription)
     }
+
+    lifecycleLock.lock()
+    stdoutReadDescriptor = readDescriptor
+    lifecycleLock.unlock()
   }
 
   public func request(
@@ -70,16 +83,19 @@ public final class MCPStdioJSONRPCClient: MCPJSONRPCClientProtocol, @unchecked S
       while true {
         let line = try await self.readLine()
         guard let data = line.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(AgentHubMCPUIJSONValue.self, from: data),
-              decoded.objectValue != nil else {
+          let decoded = try? JSONDecoder().decode(AgentHubMCPUIJSONValue.self, from: data),
+          decoded.objectValue != nil
+        else {
           throw MCPAppDiscoveryError.invalidResponse(line)
         }
 
-        guard let result = try MCPJSONRPCMessage.result(
-          from: decoded,
-          expectedID: id,
-          method: method
-        ) else {
+        guard
+          let result = try MCPJSONRPCMessage.result(
+            from: decoded,
+            expectedID: id,
+            method: method
+          )
+        else {
           continue
         }
         return result
@@ -105,6 +121,10 @@ public final class MCPStdioJSONRPCClient: MCPJSONRPCClientProtocol, @unchecked S
     try? stdinPipe.fileHandleForWriting.close()
     try? stdoutPipe.fileHandleForReading.close()
     try? stderrPipe.fileHandleForReading.close()
+
+    readQueue.async {
+      self.closeReadDescriptor()
+    }
 
     guard process.isRunning else { return }
     process.terminate()
@@ -137,14 +157,50 @@ public final class MCPStdioJSONRPCClient: MCPJSONRPCClientProtocol, @unchecked S
   private func readLine() async throws -> String {
     try await withCheckedThrowingContinuation { continuation in
       readQueue.async {
+        guard let readDescriptor = self.currentReadDescriptor() else {
+          continuation.resume(throwing: MCPAppDiscoveryError.processClosed(self.config.name))
+          return
+        }
+
         var data = Data()
         while true {
-          let byte = self.stdoutPipe.fileHandleForReading.readData(ofLength: 1)
-          if byte.isEmpty {
+          guard !self.connectionIsClosed() else {
             continuation.resume(throwing: MCPAppDiscoveryError.processClosed(self.config.name))
             return
           }
-          if byte == Data([0x0A]) {
+
+          var pollDescriptor = pollfd(
+            fd: readDescriptor,
+            events: Int16(POLLIN | POLLHUP | POLLERR),
+            revents: 0
+          )
+          let pollResult = Darwin.poll(&pollDescriptor, 1, 100)
+          if pollResult == 0 {
+            continue
+          }
+          if pollResult < 0 {
+            if errno == EINTR {
+              continue
+            }
+            continuation.resume(throwing: MCPAppDiscoveryError.processClosed(self.config.name))
+            return
+          }
+
+          var byte: UInt8 = 0
+          let bytesRead = Darwin.read(readDescriptor, &byte, 1)
+          if bytesRead == 0 {
+            continuation.resume(throwing: MCPAppDiscoveryError.processClosed(self.config.name))
+            return
+          }
+          if bytesRead < 0 {
+            if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK {
+              continue
+            }
+            continuation.resume(throwing: MCPAppDiscoveryError.processClosed(self.config.name))
+            return
+          }
+
+          if byte == 0x0A {
             continuation.resume(returning: String(data: data, encoding: .utf8) ?? "")
             return
           }
@@ -152,6 +208,34 @@ public final class MCPStdioJSONRPCClient: MCPJSONRPCClientProtocol, @unchecked S
         }
       }
     }
+  }
+
+  private func currentReadDescriptor() -> Int32? {
+    lifecycleLock.lock()
+    defer { lifecycleLock.unlock() }
+    guard !isClosed, stdoutReadDescriptor >= 0 else { return nil }
+    return stdoutReadDescriptor
+  }
+
+  private func connectionIsClosed() -> Bool {
+    lifecycleLock.lock()
+    defer { lifecycleLock.unlock() }
+    return isClosed
+  }
+
+  private func closeReadDescriptor() {
+    lifecycleLock.lock()
+    let descriptor = stdoutReadDescriptor
+    stdoutReadDescriptor = -1
+    lifecycleLock.unlock()
+
+    if descriptor >= 0 {
+      Darwin.close(descriptor)
+    }
+  }
+
+  private func posixErrorDescription() -> String {
+    String(cString: strerror(errno))
   }
 
   private func withTimeout<T: Sendable>(

@@ -42,6 +42,7 @@ let package = Package(
     ),
   ],
   dependencies: [
+    .package(path: "../AgentWorkflowCore"),
     .package(path: "../AgentHubCLI"),
     .package(path: "../AgentHubGitHub"),
     .package(path: "../Storybook"),
@@ -128,6 +129,8 @@ let package = Package(
     .target(
       name: "AgentHubCore",
       dependencies: [
+        .product(name: "AgentWorkflowCore", package: "AgentWorkflowCore"),
+        .product(name: "AgentWorkflowJiraCLI", package: "AgentWorkflowCore"),
         "ClaudeCodeClient",
         "AgentHubGitDiff",
         "AgentHubFileSearch",
@@ -206,6 +209,8 @@ let package = Package(
       name: "AgentHubTests",
       dependencies: [
         "AgentHubCore",
+        .product(name: "AgentWorkflowCore", package: "AgentWorkflowCore"),
+        .product(name: "AgentWorkflowJiraCLI", package: "AgentWorkflowCore"),
         .product(name: "AgentHubCLIKit", package: "AgentHubCLI"),
         "AgentHubGitDiff",
         "AgentHubFileSearch",

@@ -10,8 +10,8 @@ import AgentHubGitDiff
 import AgentHubGitHub
 import ClaudeCodeClient
 import Foundation
-import os
 import SimulatorPreview
+import os
 
 #if canImport(AppKit)
   import AppKit
@@ -56,10 +56,12 @@ public final class AgentHubProvider {
   // MARK: - Lazy Services
 
   /// Monitor service for tracking CLI sessions
-  public private(set) lazy var monitorService: CLISessionMonitorService = .init(claudeDataPath: configuration.claudeDataPath, metadataStore: metadataStore)
+  public private(set) lazy var monitorService: CLISessionMonitorService = .init(
+    claudeDataPath: configuration.claudeDataPath, metadataStore: metadataStore)
 
   /// Monitor service for tracking Codex sessions
-  public private(set) lazy var codexMonitorService: CodexSessionMonitorService = .init(codexDataPath: configuration.codexDataPath, metadataStore: metadataStore)
+  public private(set) lazy var codexMonitorService: CodexSessionMonitorService = .init(
+    codexDataPath: configuration.codexDataPath, metadataStore: metadataStore)
 
   /// Git worktree service for branch/worktree operations
   public private(set) lazy var gitService: GitWorktreeService = .init()
@@ -69,13 +71,16 @@ public final class AgentHubProvider {
   public private(set) lazy var appVisibilityMonitor: AppVisibilityMonitor = .init()
 
   /// Global stats service for Claude usage metrics
-  public private(set) lazy var statsService: GlobalStatsService = .init(claudePath: configuration.claudeDataPath)
+  public private(set) lazy var statsService: GlobalStatsService = .init(
+    claudePath: configuration.claudeDataPath)
 
   /// Global stats service for Codex usage metrics
-  public private(set) lazy var codexStatsService: CodexGlobalStatsService = .init(codexPath: configuration.codexDataPath)
+  public private(set) lazy var codexStatsService: CodexGlobalStatsService = .init(
+    codexPath: configuration.codexDataPath)
 
   /// Codex file watcher for real-time monitoring
-  private lazy var codexFileWatcher: CodexSessionFileWatcher = .init(codexPath: configuration.codexDataPath)
+  private lazy var codexFileWatcher: CodexSessionFileWatcher = .init(
+    codexPath: configuration.codexDataPath)
 
   /// Claude file watcher for real-time monitoring. Wired to the approval hook
   /// sidecar so pending-approval state can be surfaced while Claude Code CLI
@@ -86,42 +91,52 @@ public final class AgentHubProvider {
   )
 
   /// Shared claim store gating the approval hook script.
-  public private(set) lazy var approvalClaimStore: any ApprovalClaimStoreProtocol = ApprovalClaimStore()
+  public private(set) lazy var approvalClaimStore: any ApprovalClaimStoreProtocol =
+    ApprovalClaimStore()
 
   /// Watches the approval sidecar directory populated by the installed hook.
-  public private(set) lazy var claudeHookSidecarWatcher: any ClaudeHookSidecarWatcherProtocol = ClaudeHookSidecarWatcher()
+  public private(set) lazy var claudeHookSidecarWatcher: any ClaudeHookSidecarWatcherProtocol =
+    ClaudeHookSidecarWatcher()
 
   /// Installs/uninstalls the AgentHub approval hook per worktree.
   public private(set) lazy var claudeHookInstaller: any ClaudeHookInstallerProtocol = {
     guard let metadataStore else {
-      AppLogger.session.error("[ClaudeHook] SessionMetadataStore unavailable; approval hook installation disabled")
+      AppLogger.session.error(
+        "[ClaudeHook] SessionMetadataStore unavailable; approval hook installation disabled")
       return NoOpClaudeHookInstaller()
     }
     return ClaudeHookInstaller(stateStore: metadataStore)
   }()
 
   /// Claude search service
-  private lazy var claudeSearchService: GlobalSearchService = .init(claudeDataPath: configuration.claudeDataPath)
+  private lazy var claudeSearchService: GlobalSearchService = .init(
+    claudeDataPath: configuration.claudeDataPath)
 
   /// Codex search service
-  private lazy var codexSearchService: CodexSearchService = .init(codexDataPath: configuration.codexDataPath)
+  private lazy var codexSearchService: CodexSearchService = .init(
+    codexDataPath: configuration.codexDataPath)
 
   /// Display settings for stats visualization
-  public private(set) lazy var displaySettings: StatsDisplaySettings = .init(configuration.statsDisplayMode)
+  public private(set) lazy var displaySettings: StatsDisplaySettings = .init(
+    configuration.statsDisplayMode)
 
   /// Cached project-level detector for web preview button visibility.
-  lazy var webPreviewCandidateService: any WebPreviewCandidateServiceProtocol = WebPreviewCandidateService.shared
+  lazy var webPreviewCandidateService: any WebPreviewCandidateServiceProtocol =
+    WebPreviewCandidateService.shared
 
   /// Discovers and routes MCP App UI resources exposed by configured MCP servers.
-  public private(set) lazy var mcpAppDiscoveryService: any MCPAppDiscoveryServiceProtocol = MCPAppDiscoveryService.shared
+  public private(set) lazy var mcpAppDiscoveryService: any MCPAppDiscoveryServiceProtocol =
+    MCPAppDiscoveryService.shared
 
   /// Cached project-level detector for inline diff tab visibility.
-  lazy var diffAvailabilityService: any DiffAvailabilityServiceProtocol = DiffAvailabilityService.shared
+  lazy var diffAvailabilityService: any DiffAvailabilityServiceProtocol = DiffAvailabilityService
+    .shared
 
   /// Live in-app iOS Simulator capture/streaming. All capture stays in-process;
   /// no network, no Screen Recording/Accessibility permissions. See the
   /// `SimulatorPreview` module README for the privacy contract.
-  public private(set) lazy var simulatorStreamService: any SimulatorStreamServiceProtocol = SimulatorStreamService.shared
+  public private(set) lazy var simulatorStreamService: any SimulatorStreamServiceProtocol =
+    SimulatorStreamService.shared
 
   /// Session metadata store for user-provided session names
   public private(set) lazy var metadataStore: SessionMetadataStore? = {
@@ -131,7 +146,8 @@ public final class AgentHubProvider {
     do {
       return try SessionMetadataStore()
     } catch {
-      AppLogger.session.error("Failed to create SessionMetadataStore: \(error.localizedDescription)")
+      AppLogger.session.error(
+        "Failed to create SessionMetadataStore: \(error.localizedDescription)")
       return nil
     }
   }()
@@ -144,56 +160,74 @@ public final class AgentHubProvider {
 
   /// Shared `claude -p` invocation service used by short, non-interactive
   /// callers (branch naming, session investigation, etc.).
-  public private(set) lazy var programmaticClaudeService: any ClaudeProgrammaticServiceProtocol = ClaudeProgrammaticService(
-    additionalPaths: ClaudeCodePathResolver.searchPaths(additionalPaths: configuration.additionalCLIPaths)
-  )
+  public private(set) lazy var programmaticClaudeService: any ClaudeProgrammaticServiceProtocol =
+    ClaudeProgrammaticService(
+      additionalPaths: ClaudeCodePathResolver.searchPaths(
+        additionalPaths: configuration.additionalCLIPaths)
+    )
 
   /// Claude-backed service for naming launcher-generated worktree branches.
-  public private(set) lazy var worktreeBranchNamingService: any WorktreeBranchNamingServiceProtocol = ClaudeWorktreeBranchNamingService(programmaticService: programmaticClaudeService)
+  public private(set) lazy var worktreeBranchNamingService:
+    any WorktreeBranchNamingServiceProtocol = ClaudeWorktreeBranchNamingService(
+      programmaticService: programmaticClaudeService)
 
   /// Claude-backed local audit of AgentHub's current session/worktree state.
-  public private(set) lazy var sessionInvestigationService: any SessionInvestigationServiceProtocol = ClaudeSessionInvestigationService(programmaticService: programmaticClaudeService)
+  public private(set) lazy var sessionInvestigationService:
+    any SessionInvestigationServiceProtocol = ClaudeSessionInvestigationService(
+      programmaticService: programmaticClaudeService)
 
   /// Success sound service for completed launcher-created worktrees.
-  public private(set) lazy var worktreeSuccessSoundService: any WorktreeSuccessSoundServiceProtocol = WorktreeSuccessSoundService()
+  public private(set) lazy var worktreeSuccessSoundService:
+    any WorktreeSuccessSoundServiceProtocol = WorktreeSuccessSoundService()
 
   /// Watches requests written by the bundled `agenthub` helper.
-  public private(set) lazy var worktreeLaunchRequestMonitor: any WorktreeLaunchRequestMonitorProtocol = worktreeLaunchRequestMonitorOverride ?? WorktreeLaunchRequestMonitor()
+  public private(set) lazy var worktreeLaunchRequestMonitor:
+    any WorktreeLaunchRequestMonitorProtocol =
+      worktreeLaunchRequestMonitorOverride ?? WorktreeLaunchRequestMonitor()
 
   /// Watches worktree deletion cleanup requests written by the bundled `agenthub` helper.
-  public private(set) lazy var worktreeDeletionRequestMonitor: any WorktreeDeletionRequestMonitorProtocol = worktreeDeletionRequestMonitorOverride ?? WorktreeDeletionRequestMonitor()
+  public private(set) lazy var worktreeDeletionRequestMonitor:
+    any WorktreeDeletionRequestMonitorProtocol =
+      worktreeDeletionRequestMonitorOverride ?? WorktreeDeletionRequestMonitor()
 
   /// Watches session-name requests written by the bundled `agenthub` MCP server.
-  public private(set) lazy var sessionNameRequestMonitor: any SessionNameRequestMonitorProtocol = sessionNameRequestMonitorOverride ?? SessionNameRequestMonitor()
+  public private(set) lazy var sessionNameRequestMonitor: any SessionNameRequestMonitorProtocol =
+    sessionNameRequestMonitorOverride ?? SessionNameRequestMonitor()
 
-  public private(set) lazy var worktreeLaunchRequestHandler: any WorktreeLaunchRequestHandlingProtocol = WorktreeLaunchRequestHandler(
-    claudeViewModel: claudeSessionsViewModel,
-    codexViewModel: codexSessionsViewModel
-  )
+  public private(set) lazy var worktreeLaunchRequestHandler:
+    any WorktreeLaunchRequestHandlingProtocol = WorktreeLaunchRequestHandler(
+      claudeViewModel: claudeSessionsViewModel,
+      codexViewModel: codexSessionsViewModel
+    )
 
-  public private(set) lazy var worktreeDeletionRequestHandler: any WorktreeDeletionRequestHandlingProtocol = WorktreeDeletionRequestHandler(
-    claudeViewModel: claudeSessionsViewModel,
-    codexViewModel: codexSessionsViewModel
-  )
+  public private(set) lazy var worktreeDeletionRequestHandler:
+    any WorktreeDeletionRequestHandlingProtocol = WorktreeDeletionRequestHandler(
+      claudeViewModel: claudeSessionsViewModel,
+      codexViewModel: codexSessionsViewModel
+    )
 
-  public private(set) lazy var sessionNameRequestHandler: any SessionNameRequestHandlingProtocol = SessionNameRequestHandler(
-    claudeTarget: claudeSessionsViewModel,
-    codexTarget: codexSessionsViewModel
-  )
+  public private(set) lazy var sessionNameRequestHandler: any SessionNameRequestHandlingProtocol =
+    SessionNameRequestHandler(
+      claudeTarget: claudeSessionsViewModel,
+      codexTarget: codexSessionsViewModel
+    )
 
   /// Watches the worktree-progress sidecar directory the `agenthub` CLI writes
   /// during MCP-initiated creations, so the app can surface live git progress.
-  public private(set) lazy var worktreeProgressSidecarWatcher: any WorktreeProgressSidecarWatcherProtocol = WorktreeProgressSidecarWatcher()
+  public private(set) lazy var worktreeProgressSidecarWatcher:
+    any WorktreeProgressSidecarWatcherProtocol = WorktreeProgressSidecarWatcher()
 
   /// Posts the "worktrees ready" macOS notification when a batch completes.
-  public private(set) lazy var worktreeReadyNotificationService: any WorktreeReadyNotificationServiceProtocol = WorktreeReadyNotificationService()
+  public private(set) lazy var worktreeReadyNotificationService:
+    any WorktreeReadyNotificationServiceProtocol = WorktreeReadyNotificationService()
 
   /// App-wide coordinator unifying worktree creation progress (side panel + MCP)
   /// for the top bar; fires the completion sound/notification once per batch.
-  public private(set) lazy var worktreeGenerationProgressCoordinator: WorktreeGenerationProgressCoordinator = .init(
-    soundService: worktreeSuccessSoundService,
-    notificationService: worktreeReadyNotificationService
-  )
+  public private(set) lazy var worktreeGenerationProgressCoordinator:
+    WorktreeGenerationProgressCoordinator = .init(
+      soundService: worktreeSuccessSoundService,
+      notificationService: worktreeReadyNotificationService
+    )
 
   private var isWorktreeLaunchRequestMonitoringStarted = false
   private var isWorktreeDeletionRequestMonitoringStarted = false
@@ -205,17 +239,26 @@ public final class AgentHubProvider {
   /// GitHub CLI service for PR/issue operations
   public private(set) lazy var gitHubService: any GitHubCLIServiceProtocol = GitHubCLIService()
 
+  /// Reads GitHub Projects, their saved views, and matching review pull requests.
+  public private(set) lazy var gitHubProjectReviewService: any GitHubProjectReviewServiceProtocol =
+    GitHubProjectReviewService()
+
   /// Shared session-card GitHub quick access coordinator
-  public private(set) lazy var gitHubQuickAccessCoordinator: any SessionGitHubQuickAccessCoordinatorProtocol = SessionGitHubQuickAccessCoordinator(service: gitHubService)
+  public private(set) lazy var gitHubQuickAccessCoordinator:
+    any SessionGitHubQuickAccessCoordinatorProtocol = SessionGitHubQuickAccessCoordinator(
+      service: gitHubService)
 
   /// Shared GitHub PR/check observation service for panels and session rows
-  public private(set) lazy var gitHubPRObservationService: any GitHubPRObservationServiceProtocol = GitHubPRObservationService(service: gitHubService)
+  public private(set) lazy var gitHubPRObservationService: any GitHubPRObservationServiceProtocol =
+    GitHubPRObservationService(service: gitHubService)
 
   /// Fetches failing CI logs and composes the "Fix CI" agent prompt
-  public private(set) lazy var gitHubCIFixService: any GitHubCIFixServiceProtocol = GitHubCIFixService(service: gitHubService)
+  public private(set) lazy var gitHubCIFixService: any GitHubCIFixServiceProtocol =
+    GitHubCIFixService(service: gitHubService)
 
   /// Posts macOS notifications when an observed PR's CI starts failing
-  public private(set) lazy var gitHubCIFailureNotifier: any GitHubCIFailureNotifierProtocol = GitHubCIFailureNotifier()
+  public private(set) lazy var gitHubCIFailureNotifier: any GitHubCIFailureNotifierProtocol =
+    GitHubCIFailureNotifier()
 
   /// Routes CI-failure notification taps into the monitoring UI
   public private(set) lazy var gitHubCIFailureActionRouter: GitHubCIFailureActionRouter = .init()
@@ -226,7 +269,8 @@ public final class AgentHubProvider {
   public private(set) lazy var globalSessionSelectionRouter: GlobalSessionSelectionRouter = .init()
 
   /// Coordinates the opt-in global hotkey and floating sessions panel.
-  public private(set) lazy var globalSessionControlPanelCoordinator: GlobalSessionControlPanelCoordinator = .init(provider: self)
+  public private(set) lazy var globalSessionControlPanelCoordinator:
+    GlobalSessionControlPanelCoordinator = .init(provider: self)
 
   public func makeGlobalSessionControlPanelPresenter(
     defaults: UserDefaults = .standard
@@ -242,34 +286,64 @@ public final class AgentHubProvider {
   // MARK: - View Models
 
   /// Claude sessions view model - created lazily and cached
-  public private(set) lazy var claudeSessionsViewModel: CLISessionsViewModel = makeSessionsViewModel(providerKind: .claude)
+  public private(set) lazy var claudeSessionsViewModel: CLISessionsViewModel =
+    makeSessionsViewModel(providerKind: .claude)
 
   /// Codex sessions view model - created lazily and cached
-  public private(set) lazy var codexSessionsViewModel: CLISessionsViewModel = makeSessionsViewModel(providerKind: .codex)
+  public private(set) lazy var codexSessionsViewModel: CLISessionsViewModel = makeSessionsViewModel(
+    providerKind: .codex)
+
+  /// Live workflow projection derived from the real Claude and Codex sessions.
+  public private(set) lazy var workflowDashboardViewModel: AgentWorkflowDashboardViewModel = {
+    do {
+      return AgentWorkflowDashboardViewModel(
+        runtime: try AgentWorkflowRuntime(),
+        claudeSessionsViewModel: claudeSessionsViewModel,
+        codexSessionsViewModel: codexSessionsViewModel,
+        gitHubService: gitHubService
+      )
+    } catch {
+      return AgentWorkflowDashboardViewModel(
+        runtime: nil,
+        startupError: "Could not open workflow storage: \(error.localizedDescription)",
+        claudeSessionsViewModel: claudeSessionsViewModel,
+        codexSessionsViewModel: codexSessionsViewModel,
+        gitHubService: gitHubService
+      )
+    }
+  }()
+
+  /// Project-driven queue of pull requests that are ready for independent review.
+  public private(set) lazy var gitHubReviewsViewModel: GitHubReviewsViewModel = .init(
+    service: gitHubProjectReviewService
+  )
 
   /// Bridges provider-neutral workspaces to Claude and Codex monitoring.
-  public private(set) lazy var agentWorkspaceSessionCoordinator: any AgentWorkspaceSessionCoordinating = AgentWorkspaceSessionCoordinator(
-    claudeViewModel: claudeSessionsViewModel,
-    codexViewModel: codexSessionsViewModel
-  )
+  public private(set) lazy var agentWorkspaceSessionCoordinator:
+    any AgentWorkspaceSessionCoordinating = AgentWorkspaceSessionCoordinator(
+      claudeViewModel: claudeSessionsViewModel,
+      codexViewModel: codexSessionsViewModel
+    )
 
   /// Provider-neutral, lazily mounted Ghostty workspaces.
-  public private(set) lazy var agentWorkspacesViewModel: AgentWorkspacesViewModel = AgentWorkspacesViewModel(
-    store: metadataStore,
-    metadataStore: metadataStore,
-    terminalSurfaceFactory: terminalSurfaceFactory,
-    sessionCoordinator: agentWorkspaceSessionCoordinator,
-    detectionService: AccessorySessionDetectionService(
-      claudeDataPath: configuration.claudeDataPath,
-      codexDataPath: configuration.codexDataPath
+  public private(set) lazy var agentWorkspacesViewModel: AgentWorkspacesViewModel =
+    AgentWorkspacesViewModel(
+      store: metadataStore,
+      metadataStore: metadataStore,
+      terminalSurfaceFactory: terminalSurfaceFactory,
+      sessionCoordinator: agentWorkspaceSessionCoordinator,
+      detectionService: AccessorySessionDetectionService(
+        claudeDataPath: configuration.claudeDataPath,
+        codexDataPath: configuration.codexDataPath
+      )
     )
-  )
 
   /// Backwards-compatible default sessions view model (Claude)
   public private(set) lazy var sessionsViewModel: CLISessionsViewModel = claudeSessionsViewModel
 
   /// Intelligence view model - created lazily and cached
-  public private(set) lazy var intelligenceViewModel: IntelligenceViewModel = .init(processService: createProcessService())
+  public private(set) lazy var intelligenceViewModel: IntelligenceViewModel = .init(
+    processService: createProcessService())
 
   // MARK: - Initialization
 
@@ -282,10 +356,12 @@ public final class AgentHubProvider {
   ///     target should pass a Ghostty-aware factory.
   public init(
     configuration: AgentHubConfiguration = .default,
-    terminalSurfaceFactory: any EmbeddedTerminalSurfaceFactory = DefaultEmbeddedTerminalSurfaceFactory(),
-    globalSessionControlPanelPresenterFactory: @escaping GlobalSessionControlPanelPresenterFactory = { _, _ in
-      NoOpGlobalSessionControlPanelPresenter()
-    },
+    terminalSurfaceFactory: any EmbeddedTerminalSurfaceFactory =
+      DefaultEmbeddedTerminalSurfaceFactory(),
+    globalSessionControlPanelPresenterFactory: @escaping GlobalSessionControlPanelPresenterFactory =
+      { _, _ in
+        NoOpGlobalSessionControlPanelPresenter()
+      },
     metadataStore: SessionMetadataStore? = nil,
     worktreeLaunchRequestMonitor: (any WorktreeLaunchRequestMonitorProtocol)? = nil,
     worktreeDeletionRequestMonitor: (any WorktreeDeletionRequestMonitorProtocol)? = nil,
@@ -357,7 +433,8 @@ public final class AgentHubProvider {
 
     return ClaudeCLIClient(
       command: configuration.cliCommand,
-      additionalPaths: ClaudeCodePathResolver.searchPaths(additionalPaths: configuration.additionalCLIPaths),
+      additionalPaths: ClaudeCodePathResolver.searchPaths(
+        additionalPaths: configuration.additionalCLIPaths),
       environmentOverridesProvider: { CLIEnvironmentOverrides.environment },
       debugLogger: debugLogger
     )
@@ -370,23 +447,27 @@ public final class AgentHubProvider {
     let defaults = UserDefaults.standard
     switch providerKind {
     case .claude:
-      let command = defaults.string(forKey: AgentHubDefaults.claudeCommand)
+      let command =
+        defaults.string(forKey: AgentHubDefaults.claudeCommand)
         ?? configuration.cliCommand
       let claudeArgString = defaults.string(forKey: AgentHubDefaults.claudeCommandArgs) ?? ""
       cliConfiguration = CLICommandConfiguration(
         command: command,
-        additionalPaths: ClaudeCodePathResolver.searchPaths(additionalPaths: configuration.additionalCLIPaths),
+        additionalPaths: ClaudeCodePathResolver.searchPaths(
+          additionalPaths: configuration.additionalCLIPaths),
         mode: .claude,
         extraArgs: CLICommandConfiguration.parseArgumentString(claudeArgString)
       )
     case .codex:
-      let userCommand = defaults.string(forKey: AgentHubDefaults.codexCommand) ?? configuration.codexCommand
+      let userCommand =
+        defaults.string(forKey: AgentHubDefaults.codexCommand) ?? configuration.codexCommand
       let codexArgString = defaults.string(forKey: AgentHubDefaults.codexCommandArgs) ?? ""
       // Store the user's configured command string as-is (e.g. "agenthub codex")
       // Executable resolution happens at launch time using executableName
       cliConfiguration = CLICommandConfiguration(
         command: userCommand,
-        additionalPaths: CLIPathResolver.codexPaths(additionalPaths: configuration.additionalCLIPaths),
+        additionalPaths: CLIPathResolver.codexPaths(
+          additionalPaths: configuration.additionalCLIPaths),
         mode: .codex,
         extraArgs: CLICommandConfiguration.parseArgumentString(codexArgString)
       )
@@ -415,8 +496,10 @@ public final class AgentHubProvider {
 
     // Claude sessions get the approval hook services wired in. Codex sessions
     // pass nil (no Codex hook equivalent exists today — see plan).
-    let claimStore: (any ApprovalClaimStoreProtocol)? = providerKind == .claude ? approvalClaimStore : nil
-    let installer: (any ClaudeHookInstallerProtocol)? = providerKind == .claude ? claudeHookInstaller : nil
+    let claimStore: (any ApprovalClaimStoreProtocol)? =
+      providerKind == .claude ? approvalClaimStore : nil
+    let installer: (any ClaudeHookInstallerProtocol)? =
+      providerKind == .claude ? claudeHookInstaller : nil
 
     let vm = CLISessionsViewModel(
       monitorService: selectedMonitor,
@@ -520,7 +603,8 @@ public final class AgentHubProvider {
     Task {
       await monitor.start { [weak self] queued in
         guard let self else {
-          throw WorktreeDeletionRequestHandlingError.deletionFailed("AgentHub provider is unavailable.")
+          throw WorktreeDeletionRequestHandlingError.deletionFailed(
+            "AgentHub provider is unavailable.")
         }
         try await self.worktreeDeletionRequestHandler.handle(queued.request)
       }
@@ -596,7 +680,9 @@ public final class AgentHubProvider {
       semaphore.signal()
     }
     if semaphore.wait(timeout: .now() + timeout) == .timedOut {
-      AppLogger.session.error("[ClaudeHook] reconcileClaudeHooksOnLaunch timed out after \(timeout)s — first session sync may race")
+      AppLogger.session.error(
+        "[ClaudeHook] reconcileClaudeHooksOnLaunch timed out after \(timeout)s — first session sync may race"
+      )
     }
   }
 
@@ -625,14 +711,17 @@ public final class AgentHubProvider {
     }
     let deadline = DispatchTime.now() + timeout
     if semaphore.wait(timeout: deadline) == .timedOut {
-      AppLogger.session.error("[ClaudeHook] flushClaudeHooksOnTerminate timed out after \(timeout)s — shutdown may leave stale hook state behind")
+      AppLogger.session.error(
+        "[ClaudeHook] flushClaudeHooksOnTerminate timed out after \(timeout)s — shutdown may leave stale hook state behind"
+      )
     }
   }
 
   /// Terminates all active terminal processes.
   /// Call this on app termination to clean up all running Claude sessions.
   public func terminateAllTerminals() {
-    let allTerminals = claudeSessionsViewModel.managedTerminalEntries
+    let allTerminals =
+      claudeSessionsViewModel.managedTerminalEntries
       + codexSessionsViewModel.managedTerminalEntries
 
     for (key, terminal) in allTerminals {
@@ -643,7 +732,8 @@ public final class AgentHubProvider {
   }
 
   public func recreateEmbeddedTerminalsForSelectedBackend() {
-    AppLogger.session.info("Terminal backend changes require app restart; keeping existing terminals alive")
+    AppLogger.session.info(
+      "Terminal backend changes require app restart; keeping existing terminals alive")
   }
 
   public func relaunchApplication() {

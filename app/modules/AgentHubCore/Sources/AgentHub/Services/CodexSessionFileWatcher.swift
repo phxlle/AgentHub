@@ -17,7 +17,8 @@ public actor CodexSessionFileWatcher {
   private var watchedSessions: [String: FileWatcherInfo] = [:]
   private nonisolated let stateSubject = PassthroughSubject<SessionFileWatcher.StateUpdate, Never>()
   private let codexPath: String
-  private nonisolated let processingQueue = DispatchQueue(label: "com.agenthub.codexwatcher.processing")
+  private nonisolated let processingQueue = DispatchQueue(
+    label: "com.agenthub.codexwatcher.processing")
   private var approvalTimeoutSeconds: Int = 0
 
   public nonisolated var statePublisher: AnyPublisher<SessionFileWatcher.StateUpdate, Never> {
@@ -32,7 +33,9 @@ public actor CodexSessionFileWatcher {
     self.approvalTimeoutSeconds = max(1, seconds)
   }
 
-  public func startMonitoring(sessionId: String, projectPath: String, sessionFilePath: String? = nil) async {
+  public func startMonitoring(
+    sessionId: String, projectPath: String, sessionFilePath: String? = nil
+  ) async {
     if let existing = watchedSessions[sessionId] {
       let state = buildMonitorState(from: existing.parseResult)
       stateSubject.send(SessionFileWatcher.StateUpdate(sessionId: sessionId, state: state))
@@ -75,17 +78,21 @@ public actor CodexSessionFileWatcher {
     let statusTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
 
     func rescheduleStatusTimer() {
-      guard let nextInterval = SessionWatcherTimerPolicy.nextInterval(
-        lastActivity: parseResult.recentActivities.last,
-        currentStatus: parseResult.currentStatus,
-        lastFileEventTime: lastFileEventTime,
-        approvalTimeoutSeconds: timeout
-      ) else {
-        statusTimer.schedule(deadline: .distantFuture, leeway: SessionWatcherTimerPolicy.timerLeeway)
+      guard
+        let nextInterval = SessionWatcherTimerPolicy.nextInterval(
+          lastActivity: parseResult.recentActivities.last,
+          currentStatus: parseResult.currentStatus,
+          lastFileEventTime: lastFileEventTime,
+          approvalTimeoutSeconds: timeout
+        )
+      else {
+        statusTimer.schedule(
+          deadline: .distantFuture, leeway: SessionWatcherTimerPolicy.timerLeeway)
         return
       }
 
-      statusTimer.schedule(deadline: .now() + nextInterval, leeway: SessionWatcherTimerPolicy.timerLeeway)
+      statusTimer.schedule(
+        deadline: .now() + nextInterval, leeway: SessionWatcherTimerPolicy.timerLeeway)
     }
 
     source.setEventHandler { [weak self] in
@@ -98,12 +105,14 @@ public actor CodexSessionFileWatcher {
           rescheduleStatusTimer()
           return
         }
-        CodexSessionJSONLParser.parseNewLines(newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
+        CodexSessionJSONLParser.parseNewLines(
+          newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
         lastEmittedStatus = parseResult.currentStatus
 
         let updatedState = self.buildMonitorState(from: parseResult)
         Task { @MainActor in
-          self.stateSubject.send(SessionFileWatcher.StateUpdate(sessionId: sessionId, state: updatedState))
+          self.stateSubject.send(
+            SessionFileWatcher.StateUpdate(sessionId: sessionId, state: updatedState))
         }
 
         let parseResultSnapshot = parseResult
@@ -142,7 +151,8 @@ public actor CodexSessionFileWatcher {
           var tempPosition = lastKnownFileSize
           let newLines = self.readNewLines(from: filePath, startingAt: &tempPosition)
           if !newLines.isEmpty {
-            CodexSessionJSONLParser.parseNewLines(newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
+            CodexSessionJSONLParser.parseNewLines(
+              newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
             lastKnownFileSize = tempPosition
             lastFileEventTime = Date()
           } else {
@@ -160,7 +170,8 @@ public actor CodexSessionFileWatcher {
           let updatedState = self.buildMonitorState(from: parseResult)
 
           Task { @MainActor in
-            self.stateSubject.send(SessionFileWatcher.StateUpdate(sessionId: sessionId, state: updatedState))
+            self.stateSubject.send(
+              SessionFileWatcher.StateUpdate(sessionId: sessionId, state: updatedState))
           }
         } else if previousStatus != parseResult.currentStatus {
           lastEmittedStatus = parseResult.currentStatus
@@ -216,11 +227,13 @@ public actor CodexSessionFileWatcher {
     let newLines = readNewLines(from: info.filePath, startingAt: &filePosition)
 
     if !newLines.isEmpty {
-      CodexSessionJSONLParser.parseNewLines(newLines, into: &parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
+      CodexSessionJSONLParser.parseNewLines(
+        newLines, into: &parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
       info.lastKnownFileSize = filePosition
       info.lastFileEventTime = Date()
     } else {
-      CodexSessionJSONLParser.updateCurrentStatus(&parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
+      CodexSessionJSONLParser.updateCurrentStatus(
+        &parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
     }
 
     info.parseResult = parseResult
@@ -253,7 +266,9 @@ public actor CodexSessionFileWatcher {
     return UInt64(st.st_size)
   }
 
-  private nonisolated func readNewLines(from path: String, startingAt position: inout UInt64) -> [String] {
+  private nonisolated func readNewLines(from path: String, startingAt position: inout UInt64)
+    -> [String]
+  {
     guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
     defer { try? handle.close() }
 
@@ -272,7 +287,9 @@ public actor CodexSessionFileWatcher {
     }
   }
 
-  private nonisolated func buildMonitorState(from result: CodexSessionJSONLParser.ParseResult) -> SessionMonitorState {
+  private nonisolated func buildMonitorState(from result: CodexSessionJSONLParser.ParseResult)
+    -> SessionMonitorState
+  {
     return SessionMonitorState(
       status: result.currentStatus,
       currentTool: result.pendingToolUses.first?.value.toolName,
@@ -292,6 +309,7 @@ public actor CodexSessionFileWatcher {
       // way to surface approval-window state. See plans/parsed-weaving-nebula.md.
       pendingToolUse: nil,
       recentActivities: result.recentActivities,
+      lastAssistantMessage: result.lastAssistantMessage,
       hasMermaidContent: result.hasMermaidContent,
       detectedResourceLinks: result.detectedResourceLinks,
       detectedMCPAppResources: result.detectedMCPAppResources,

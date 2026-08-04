@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-03T00:00:00+02:00",
+  "title": "Design System: AgentHub",
+  "extensions": {
+    "colorMeta": {
+      "signal-slate": { "role": "primary", "displayName": "Signal Slate", "canonical": "#A0AEC0", "tonalRamp": ["#1B1E22", "#30353B", "#474E57", "#606A76", "#7C8998", "#A0AEC0", "#C5CDD6", "#EEF1F4"] },
+      "graphite-channel": { "role": "secondary", "displayName": "Graphite Channel", "canonical": "#2D3748", "tonalRamp": ["#12161C", "#1C232E", "#2D3748", "#45546D", "#60738F", "#8191A8", "#AFBAC9", "#E7EBF0"] },
+      "cool-paper": { "role": "tertiary", "displayName": "Cool Paper", "canonical": "#CBD5E0", "tonalRamp": ["#20252A", "#343C44", "#4F5B67", "#6C7B8A", "#8D9EAF", "#ADBCCB", "#CBD5E0", "#F1F4F7"] },
+      "ink-canvas": { "role": "neutral", "displayName": "Ink Canvas", "canonical": "#0D0D0D", "tonalRamp": ["#0D0D0D", "#242424", "#3C3C3C", "#575757", "#747474", "#969696", "#BDBDBD", "#F2F2F2"] },
+      "terminal-well": { "role": "neutral", "displayName": "Terminal Well", "canonical": "#080808", "tonalRamp": ["#080808", "#202020", "#383838", "#535353", "#717171", "#939393", "#BBBBBB", "#F1F1F1"] },
+      "mist-text": { "role": "neutral", "displayName": "Mist Text", "canonical": "#E2E8F0", "tonalRamp": ["#22272D", "#37404A", "#53606E", "#718293", "#93A5B6", "#B5C3D0", "#D3DCE5", "#F4F6F8"] },
+      "warm-workspace": { "role": "neutral", "displayName": "Warm Workspace", "canonical": "#FAF9F5", "tonalRamp": ["#272622", "#403E38", "#5F5C53", "#817D71", "#A7A297", "#CBC7BE", "#E7E4DD", "#FAF9F5"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Panel and section headings." },
+      "title": { "displayName": "Title", "purpose": "Ticket keys and branch names." },
+      "body": { "displayName": "Body", "purpose": "Human-facing descriptions and explanations." },
+      "label": { "displayName": "Label", "purpose": "Compact controls, roles, and statuses." },
+      "code": { "displayName": "Code", "purpose": "Branches, paths, commands, hashes, and session identifiers." }
+    },
+    "shadows": [
+      { "name": "overlay-only", "value": "0 12px 32px rgba(0,0,0,0.24)", "purpose": "Transient menus, sheets, and command palettes only." }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "150ms ease-out", "purpose": "Hover, selection, and compact control state changes." }
+    ],
+    "breakpoints": [
+      { "name": "minimum-app-width", "value": "1200px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single current workflow action.",
+      "html": "<button class=\"ds-button-primary\">Start ticket</button>",
+      "css": ".ds-button-primary { background:#A0AEC0; color:#0D0D0D; border:0; border-radius:6px; padding:4px 8px; font:500 11px Geist,-apple-system,sans-serif; transition:background 150ms ease-out; } .ds-button-primary:hover { background:#CBD5E0; } .ds-button-primary:focus-visible { outline:2px solid #E2E8F0; outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A quiet supporting action.",
+      "html": "<button class=\"ds-button-secondary\">Open terminal</button>",
+      "css": ".ds-button-secondary { background:#2D3748; color:#E2E8F0; border:1px solid #475569; border-radius:6px; padding:4px 8px; font:500 11px Geist,-apple-system,sans-serif; transition:background 150ms ease-out; } .ds-button-secondary:hover { background:#45546D; } .ds-button-secondary:focus-visible { outline:2px solid #A0AEC0; outline-offset:2px; }"
+    },
+    {
+      "name": "Ticket Field",
+      "kind": "input",
+      "description": "Compact Jira ticket entry with native field proportions.",
+      "html": "<input class=\"ds-ticket-field\" value=\"XFA-3299\" aria-label=\"Jira ticket\">",
+      "css": ".ds-ticket-field { background:#0D0D0D; color:#E2E8F0; border:1px solid #2D3748; border-radius:6px; padding:6px 8px; font:400 11px 'JetBrains Mono',monospace; } .ds-ticket-field:hover { border-color:#606A76; } .ds-ticket-field:focus-visible { outline:2px solid #A0AEC0; outline-offset:1px; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "description": "Textual workflow state that never relies on color alone.",
+      "html": "<span class=\"ds-status-chip\">● Reviewing</span>",
+      "css": ".ds-status-chip { display:inline-flex; align-items:center; background:#2D3748; color:#E2E8F0; border-radius:6px; padding:3px 6px; font:500 11px Geist,-apple-system,sans-serif; }"
+    },
+    {
+      "name": "Branch Row",
+      "kind": "custom",
+      "description": "One continuous operational row for a branch and its two agents.",
+      "html": "<div class=\"ds-branch-row\"><strong>XFA-3299-login</strong><span>Codex · Implementing</span><span>Claude · Reviewer ready</span></div>",
+      "css": ".ds-branch-row { display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:12px; align-items:center; background:#0D0D0D; color:#E2E8F0; border:1px solid #2D3748; border-radius:10px; padding:12px; font:400 12px Geist,-apple-system,sans-serif; } .ds-branch-row strong { font:600 11px 'JetBrains Mono',monospace; } .ds-branch-row:hover { background:#12161C; border-color:#474E57; } .ds-branch-row:focus-within { outline:2px solid #A0AEC0; outline-offset:1px; }"
+    },
+    {
+      "name": "Terminal Panel",
+      "kind": "custom",
+      "refersTo": "terminal-panel",
+      "description": "Recessed first-class terminal surface.",
+      "html": "<pre class=\"ds-terminal-panel\"><span>$ codex exec</span>\nReviewing branch XFA-3299-login</pre>",
+      "css": ".ds-terminal-panel { background:#080808; color:#E2E8F0; border:1px solid #2D3748; border-radius:10px; padding:12px; font:400 11px/1.4 'JetBrains Mono',monospace; } .ds-terminal-panel:hover { border-color:#474E57; } .ds-terminal-panel:focus-visible { outline:2px solid #A0AEC0; outline-offset:1px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operations Desk",
+    "overview": "A quiet, precise macOS workspace where tickets, branches, agents, terminals, and human decisions share one stable hierarchy.",
+    "keyCharacteristics": ["Native and compact", "Operational truth", "Terminal first", "Explicit ownership", "Accessible by default"],
+    "rules": [
+      { "name": "The Signal Is Rare Rule", "body": "Signal Slate marks selection or action, never decoration.", "section": "colors" },
+      { "name": "The Mono Means Machine Rule", "body": "Use monospace only for machine-facing values.", "section": "typography" },
+      { "name": "The Surface Before Shadow Rule", "body": "Use tone and separators before shadow.", "section": "elevation" }
+    ],
+    "dos": ["Do make ownership visible.", "Do keep terminals first-class.", "Do pair state color with text.", "Do preserve native macOS behavior."],
+    "donts": ["Don't resemble a neon AI control room.", "Don't use chat-first navigation.", "Don't build a wall of interchangeable cards.", "Don't use decorative gradients, glassmorphism, animated agent avatars, oversized metrics, or vague status language."]
+  }
+}

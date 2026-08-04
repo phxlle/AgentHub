@@ -28,6 +28,7 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     static let createProjectSimulatorPreferences = "v11_create_project_simulator_preferences"
     static let createAgentWorkspaces = "v12_create_agent_workspaces"
     static let createPinnedSessionOrder = "v13_create_pinned_session_order"
+    static let addSelectedFolderPaths = "v14_add_selected_folder_paths"
   }
 
   static let migrationIdentifiers = [
@@ -43,7 +44,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     MigrationID.createSessionRelationships,
     MigrationID.createProjectSimulatorPreferences,
     MigrationID.createAgentWorkspaces,
-    MigrationID.createPinnedSessionOrder
+    MigrationID.createPinnedSessionOrder,
+    MigrationID.addSelectedFolderPaths,
   ]
 
   private let dbQueue: DatabaseQueue
@@ -153,7 +155,9 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
         t.column("updatedAt", .datetime).notNull()
       }
       try db.create(index: "idx_managed_processes_kind", on: "managed_processes", columns: ["kind"])
-      try db.create(index: "idx_managed_processes_session", on: "managed_processes", columns: ["provider", "sessionId"])
+      try db.create(
+        index: "idx_managed_processes_session", on: "managed_processes",
+        columns: ["provider", "sessionId"])
     }
 
     migrator.registerMigration(MigrationID.createClaudeHookInstallations) { db in
@@ -247,6 +251,12 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
       }
     }
 
+    migrator.registerMigration(MigrationID.addSelectedFolderPaths) { db in
+      try db.alter(table: "session_workspace_state") { t in
+        t.add(column: "selectedFolderPathsData", .blob)
+      }
+    }
+
     return migrator
   }
 
@@ -301,7 +311,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
   /// Gets all pinned session IDs
   public func getPinnedSessionIds() throws -> Set<String> {
     try dbQueue.read { db in
-      let records = try SessionMetadata
+      let records =
+        try SessionMetadata
         .filter(Column("isPinned") == true)
         .fetchAll(db)
       return Set(records.map(\.sessionId))
@@ -311,7 +322,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
   /// Synchronous read for pinned session IDs — safe to call from non-async contexts.
   public nonisolated func getPinnedSessionIdsSync() -> Set<String> {
     (try? dbQueue.read { db in
-      let records = try SessionMetadata
+      let records =
+        try SessionMetadata
         .filter(Column("isPinned") == true)
         .fetchAll(db)
       return Set(records.map(\.sessionId))
@@ -377,7 +389,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
   /// Gets all metadata for multiple sessions at once (batch fetch)
   public func getMetadata(for sessionIds: [String]) throws -> [String: SessionMetadata] {
     try dbQueue.read { db in
-      let records = try SessionMetadata
+      let records =
+        try SessionMetadata
         .filter(sessionIds.contains(Column("sessionId")))
         .fetchAll(db)
 
@@ -388,7 +401,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
   /// Deletes metadata for a session
   public func deleteMetadata(for sessionId: String) throws {
     try dbQueue.write { db in
-      _ = try TerminalWorkspaceRecord
+      _ =
+        try TerminalWorkspaceRecord
         .filter(Column("sessionId") == sessionId)
         .deleteAll(db)
       _ = try SessionMetadata.deleteOne(db, key: sessionId)
@@ -397,7 +411,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
       let itemIds = SessionProviderKind.allCases.map {
         SidebarSessionItemID.monitored(provider: $0, sessionId: sessionId)
       }
-      _ = try PinnedSessionOrderRecord
+      _ =
+        try PinnedSessionOrderRecord
         .filter(itemIds.contains(Column("itemId")))
         .deleteAll(db)
     }
@@ -423,7 +438,9 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
 
   // MARK: - Workspace State
 
-  public nonisolated func getWorkspaceStateSync(for provider: SessionProviderKind) -> SessionWorkspaceState {
+  public nonisolated func getWorkspaceStateSync(for provider: SessionProviderKind)
+    -> SessionWorkspaceState
+  {
     (try? dbQueue.read { db in
       try SessionWorkspaceStateRecord
         .filter(Column("provider") == provider.rawValue)
@@ -432,7 +449,9 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     }) ?? SessionWorkspaceState()
   }
 
-  public func saveWorkspaceState(_ state: SessionWorkspaceState, for provider: SessionProviderKind) async throws {
+  public func saveWorkspaceState(_ state: SessionWorkspaceState, for provider: SessionProviderKind)
+    async throws
+  {
     let record = try SessionWorkspaceStateRecord(provider: provider.rawValue, state: state)
     try await dbQueue.write { db in
       try record.save(db)
@@ -461,7 +480,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
   /// Gets repo mappings for multiple sessions at once (batch fetch)
   public func getRepoMappings(for sessionIds: [String]) throws -> [String: SessionRepoMapping] {
     try dbQueue.read { db in
-      let records = try SessionRepoMapping
+      let records =
+        try SessionRepoMapping
         .filter(sessionIds.contains(Column("sessionId")))
         .fetchAll(db)
 
@@ -514,11 +534,13 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     backend: EmbeddedTerminalBackend
   ) -> TerminalWorkspaceSnapshot? {
     try? dbQueue.read { db in
-      guard let record = try TerminalWorkspaceRecord
-        .filter(Column("provider") == provider.rawValue)
-        .filter(Column("sessionId") == sessionId)
-        .filter(Column("backend") == backend.rawValue)
-        .fetchOne(db)
+      guard
+        let record =
+          try TerminalWorkspaceRecord
+          .filter(Column("provider") == provider.rawValue)
+          .filter(Column("sessionId") == sessionId)
+          .filter(Column("backend") == backend.rawValue)
+          .fetchOne(db)
       else {
         return nil
       }
@@ -552,7 +574,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     backend: EmbeddedTerminalBackend
   ) async throws {
     try await dbQueue.write { db in
-      _ = try TerminalWorkspaceRecord
+      _ =
+        try TerminalWorkspaceRecord
         .filter(Column("provider") == provider.rawValue)
         .filter(Column("sessionId") == sessionId)
         .filter(Column("backend") == backend.rawValue)
@@ -584,7 +607,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
   ) async throws {
     try await dbQueue.write { db in
       try workspace.save(db)
-      _ = try AgentWorkspaceSessionLink
+      _ =
+        try AgentWorkspaceSessionLink
         .filter(Column("workspaceId") == workspace.id)
         .deleteAll(db)
       for link in links {
@@ -595,7 +619,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
 
   public func deleteAgentWorkspace(id: String) async throws {
     try await dbQueue.write { db in
-      _ = try AgentWorkspaceSessionLink
+      _ =
+        try AgentWorkspaceSessionLink
         .filter(Column("workspaceId") == id)
         .deleteAll(db)
       _ = try AgentWorkspaceRecord.deleteOne(db, key: id)
@@ -619,7 +644,8 @@ extension SessionMetadataStore: ManagedProcessStoreProtocol {
   public func deleteManagedProcesses(pids: [Int32]) async throws {
     guard !pids.isEmpty else { return }
     try await dbQueue.write { db in
-      _ = try ManagedProcessRecord
+      _ =
+        try ManagedProcessRecord
         .filter(pids.contains(Column("pid")))
         .deleteAll(db)
     }
@@ -640,13 +666,15 @@ extension SessionMetadataStore: SessionRelationshipStoreProtocol {
 
     try await dbQueue.write { db in
       var record = updatedRecord
-      if let existing = try SessionRelationshipRecord
+      if let existing =
+        try SessionRelationshipRecord
         .filter(Column("sourceProvider") == record.sourceProvider)
         .filter(Column("sourceSessionId") == record.sourceSessionId)
         .filter(Column("targetProvider") == record.targetProvider)
         .filter(Column("targetSessionId") == record.targetSessionId)
         .filter(Column("kind") == record.kind)
-        .fetchOne(db) {
+        .fetchOne(db)
+      {
         record.createdAt = existing.createdAt
       }
       try record.save(db)
@@ -659,13 +687,15 @@ extension SessionMetadataStore: SessionRelationshipStoreProtocol {
     kind: SessionRelationshipKind?
   ) async throws -> [SessionRelationshipRecord] {
     try await dbQueue.read { db in
-      var request = SessionRelationshipRecord
+      var request =
+        SessionRelationshipRecord
         .filter(Column("sourceProvider") == sourceProvider.rawValue)
         .filter(Column("sourceSessionId") == sessionId)
       if let kind {
         request = request.filter(Column("kind") == kind.rawValue)
       }
-      return try request
+      return
+        try request
         .order(Column("createdAt"))
         .fetchAll(db)
     }
@@ -677,13 +707,15 @@ extension SessionMetadataStore: SessionRelationshipStoreProtocol {
     kind: SessionRelationshipKind?
   ) async throws -> [SessionRelationshipRecord] {
     try await dbQueue.read { db in
-      var request = SessionRelationshipRecord
+      var request =
+        SessionRelationshipRecord
         .filter(Column("targetProvider") == targetProvider.rawValue)
         .filter(Column("targetSessionId") == sessionId)
       if let kind {
         request = request.filter(Column("kind") == kind.rawValue)
       }
-      return try request
+      return
+        try request
         .order(Column("createdAt"))
         .fetchAll(db)
     }
@@ -697,7 +729,8 @@ extension SessionMetadataStore: SessionRelationshipStoreProtocol {
     kind: SessionRelationshipKind
   ) async throws {
     try await dbQueue.write { db in
-      _ = try SessionRelationshipRecord
+      _ =
+        try SessionRelationshipRecord
         .filter(Column("sourceProvider") == sourceProvider.rawValue)
         .filter(Column("sourceSessionId") == sourceSessionId)
         .filter(Column("targetProvider") == targetProvider.rawValue)
@@ -750,18 +783,21 @@ extension SessionMetadataStore: ClaudeHookInstallStateStoreProtocol {
   public func replaceClaudeHookInstalledPaths(_ paths: Set<String>) async throws {
     try await dbQueue.write { db in
       let existingRecords = try ClaudeHookInstallationRecord.fetchAll(db)
-      let existingByPath = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.projectPath, $0) })
+      let existingByPath = Dictionary(
+        uniqueKeysWithValues: existingRecords.map { ($0.projectPath, $0) })
       let pathsToDelete = Array(Set(existingByPath.keys).subtracting(paths))
       let now = Date.now
 
       if !pathsToDelete.isEmpty {
-        _ = try ClaudeHookInstallationRecord
+        _ =
+          try ClaudeHookInstallationRecord
           .filter(pathsToDelete.contains(Column("projectPath")))
           .deleteAll(db)
       }
 
       for path in paths.sorted() {
-        var record = existingByPath[path] ?? ClaudeHookInstallationRecord(projectPath: path, installedAt: now)
+        var record =
+          existingByPath[path] ?? ClaudeHookInstallationRecord(projectPath: path, installedAt: now)
         record.updatedAt = now
         try record.save(db)
       }
