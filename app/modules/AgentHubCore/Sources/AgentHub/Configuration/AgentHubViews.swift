@@ -5,6 +5,7 @@
 //  Pre-configured view components for AgentHub
 //
 
+import AgentHubGitHub
 import SwiftUI
 
 // MARK: - RemoveTitleToolbarModifier
@@ -16,6 +17,242 @@ private struct RemoveTitleToolbarModifier: ViewModifier {
       content.toolbar(removing: .title)
     } else {
       content
+    }
+  }
+}
+
+// MARK: - AgentHubOperationsView
+
+/// The application-level workspace for structured ticket workflows and raw sessions.
+public struct AgentHubOperationsView: View {
+  private enum Section: String, CaseIterable, Identifiable {
+    case workflows = "Workflows"
+    case reviews = "Reviews"
+    case sessions = "Sessions"
+
+    var id: Self { self }
+  }
+
+  @Environment(\.agentHub) private var agentHub
+  @State private var section = Section.workflows
+
+  public init() {}
+
+  public var body: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Picker("Workspace", selection: $section) {
+          ForEach(Section.allCases) { section in
+            Text(section.rawValue).tag(section)
+          }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 320)
+        .accessibilityLabel("AgentHub workspace")
+
+        Spacer()
+
+        if section == .workflows {
+          Label(
+            "Workflow policy: approval before commit, push, or pull request",
+            systemImage: "hand.raised"
+          )
+          .font(.secondaryCaption)
+          .foregroundStyle(.secondary)
+        }
+      }
+      .padding(.horizontal, DesignTokens.Spacing.md)
+      .frame(height: AgentHubLayout.topBarHeight)
+
+      Divider()
+
+      Group {
+        switch section {
+        case .workflows:
+          if let agentHub {
+            AgentWorkflowDashboardView(
+              viewModel: agentHub.workflowDashboardViewModel,
+              onOpenSession: { assignment in
+                agentHub.globalSessionSelectionRouter.select(
+                  providerKind: assignment.provider,
+                  sessionId: assignment.session.id,
+                  projectPath: assignment.session.projectPath
+                )
+                section = .sessions
+              },
+              onCloseSession: { assignment in
+                let sessionsViewModel =
+                  assignment.provider == .claude
+                  ? agentHub.claudeSessionsViewModel
+                  : agentHub.codexSessionsViewModel
+                sessionsViewModel.stopMonitoring(session: assignment.session)
+              },
+              onStartSession: { workflowID, provider in
+                startSession(
+                  in: workflowID,
+                  provider: provider,
+                  agentHub: agentHub
+                )
+              }
+            )
+          } else {
+            ContentUnavailableView(
+              "AgentHub provider not found",
+              systemImage: "exclamationmark.triangle"
+            )
+          }
+        case .reviews:
+          if let agentHub {
+            GitHubReviewsView(
+              viewModel: agentHub.gitHubReviewsViewModel,
+              onReview: { pullRequest, provider in
+                startReview(
+                  pullRequest,
+                  provider: provider,
+                  agentHub: agentHub
+                )
+              }
+            )
+          } else {
+            ContentUnavailableView(
+              "AgentHub provider not found",
+              systemImage: "exclamationmark.triangle"
+            )
+          }
+        case .sessions:
+          AgentHubSessionsView()
+        }
+      }
+    }
+    .frame(minWidth: 1200, minHeight: 750)
+    .modifier(RemoveTitleToolbarModifier())
+  }
+
+  private func startSession(
+    in workflowID: String,
+    provider: SessionProviderKind,
+    agentHub: AgentHubProvider
+  ) {
+    guard
+      let workflow = agentHub.workflowDashboardViewModel.prepareManualSessionLaunch(
+        workflowID: workflowID,
+        provider: provider
+      )
+    else {
+      return
+    }
+
+    let sessionsViewModel =
+      provider == .claude
+      ? agentHub.claudeSessionsViewModel
+      : agentHub.codexSessionsViewModel
+    let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(workflow.repositoryPath)
+    let existingWorktree = sessionsViewModel.selectedRepositories
+      .flatMap(\.worktrees)
+      .first {
+        WorktreeModuleResolver.normalizedDirectoryPath($0.path) == normalizedPath
+      }
+    let launchTarget =
+      existingWorktree
+      ?? WorktreeBranch(
+        name: workflow.branchName
+          ?? URL(fileURLWithPath: normalizedPath).lastPathComponent,
+        path: normalizedPath,
+        isWorktree: workflow.branchName != nil
+      )
+
+    sessionsViewModel.addRepository(at: normalizedPath)
+    sessionsViewModel.startNewSessionInHub(
+      launchTarget,
+      initialPrompt: "Work on \(workflow.name)."
+    )
+    if let pendingSessionID = sessionsViewModel.lastCreatedPendingId {
+      agentHub.workflowDashboardViewModel.associateManualSessionLaunch(
+        workflowID: workflowID,
+        provider: provider,
+        pendingSessionID: pendingSessionID
+      )
+    }
+    section = .sessions
+  }
+
+  private func startReview(
+    _ pullRequest: GitHubProjectPullRequest,
+    provider: SessionProviderKind,
+    agentHub: AgentHubProvider
+  ) {
+    guard let project = agentHub.gitHubReviewsViewModel.selectedProject,
+      let view = agentHub.gitHubReviewsViewModel.selectedView
+    else { return }
+
+    let repositories = WorktreeModuleResolver.mergedRepositories(
+      agentHub.claudeSessionsViewModel.selectedRepositories
+        + agentHub.codexSessionsViewModel.selectedRepositories
+    )
+    guard
+      let repositoryPath = localRepositoryPath(
+        named: pullRequest.repositoryName,
+        repositories: repositories
+      )
+    else {
+      agentHub.gitHubReviewsViewModel.presentLaunchError(
+        "No local checkout found for \(pullRequest.repositoryNameWithOwner). Add that repository in Sessions first."
+      )
+      return
+    }
+
+    let sessionsViewModel =
+      provider == .claude
+      ? agentHub.claudeSessionsViewModel
+      : agentHub.codexSessionsViewModel
+    let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(repositoryPath)
+    let target = WorktreeBranch(
+      name: pullRequest.repositoryName,
+      path: normalizedPath,
+      isWorktree: false,
+      isExpanded: true
+    )
+    let prompt = GitHubProjectReviewPromptBuilder.prompt(
+      pullRequest: pullRequest,
+      project: project,
+      view: view
+    )
+
+    sessionsViewModel.addRepository(at: normalizedPath)
+    guard sessionsViewModel.startAutomatedSessionInHub(target, initialPrompt: prompt) != nil else {
+      agentHub.gitHubReviewsViewModel.presentLaunchError(
+        "Could not start the \(provider.rawValue) review session."
+      )
+      return
+    }
+    section = .sessions
+  }
+
+  private func localRepositoryPath(
+    named repositoryName: String,
+    repositories: [SelectedRepository]
+  ) -> String? {
+    if let repository = repositories.first(where: {
+      $0.name.localizedCaseInsensitiveCompare(repositoryName) == .orderedSame
+        || URL(fileURLWithPath: $0.path).lastPathComponent
+          .localizedCaseInsensitiveCompare(repositoryName) == .orderedSame
+    }) {
+      return repository.path
+    }
+
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    let candidates = [
+      "\(home)/LocalDocuments/Github/\(repositoryName)",
+      "\(home)/Documents/GitHub/\(repositoryName)",
+      "\(home)/Developer/\(repositoryName)",
+      "\(home)/Projects/\(repositoryName)",
+    ]
+    return candidates.first { candidate in
+      var isDirectory: ObjCBool = false
+      return FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory)
+        && isDirectory.boolValue
+        && FileManager.default.fileExists(atPath: "\(candidate)/.git")
     }
   }
 }
@@ -59,11 +296,11 @@ public struct AgentHubSessionsView: View {
       worktreeBranchNamingService: provider.worktreeBranchNamingService,
       worktreeSuccessSoundService: provider.worktreeSuccessSoundService
     )
-      .frame(minWidth: 1200, minHeight: 750)
-      .modifier(RemoveTitleToolbarModifier())
-      .task {
-        provider.startWorktreeLaunchRequestMonitoring()
-      }
+    .frame(minWidth: 1200, minHeight: 750)
+    .modifier(RemoveTitleToolbarModifier())
+    .task {
+      provider.startWorktreeLaunchRequestMonitoring()
+    }
   }
 
   private var missingProviderView: some View {

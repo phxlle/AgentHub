@@ -149,7 +149,7 @@ struct AgentHubApp: App {
 
   var body: some Scene {
     WindowGroup {
-      AgentHubSessionsView()
+      AgentHubOperationsView()
         .agentHub(appDelegate.provider)
     }
     .windowStyle(.hiddenTitleBar)

@@ -18,9 +18,9 @@ public struct SessionMonitorState: Equatable, Sendable {
   public var lastActivityAt: Date
 
   // Tokens - context window tracking
-  public var inputTokens: Int       // Last input tokens (represents current context window usage)
-  public var outputTokens: Int      // Last output tokens
-  public var totalOutputTokens: Int // Accumulated output tokens (for cost calculation)
+  public var inputTokens: Int  // Last input tokens (represents current context window usage)
+  public var outputTokens: Int  // Last output tokens
+  public var totalOutputTokens: Int  // Accumulated output tokens (for cost calculation)
   public var cacheReadTokens: Int
   public var cacheCreationTokens: Int
 
@@ -35,6 +35,7 @@ public struct SessionMonitorState: Equatable, Sendable {
 
   // Recent activity log
   public var recentActivities: [ActivityEntry]
+  public var lastAssistantMessage: String?
 
   // Mermaid diagram detection
   public var hasMermaidContent: Bool
@@ -71,6 +72,7 @@ public struct SessionMonitorState: Equatable, Sendable {
     gitBranch: String? = nil,
     pendingToolUse: PendingToolUse? = nil,
     recentActivities: [ActivityEntry] = [],
+    lastAssistantMessage: String? = nil,
     hasMermaidContent: Bool = false,
     detectedResourceLinks: [ResourceLink] = [],
     detectedMCPAppResources: [MCPAppResourceDescriptor] = [],
@@ -92,6 +94,7 @@ public struct SessionMonitorState: Equatable, Sendable {
     self.gitBranch = gitBranch
     self.pendingToolUse = pendingToolUse
     self.recentActivities = recentActivities
+    self.lastAssistantMessage = lastAssistantMessage
     self.hasMermaidContent = hasMermaidContent
     self.detectedResourceLinks = detectedResourceLinks
     self.detectedMCPAppResources = detectedMCPAppResources
@@ -301,8 +304,9 @@ extension CodeChangeInput {
 
     case .multiEdit:
       if let edits = edits,
-         let data = try? JSONSerialization.data(withJSONObject: edits),
-         let string = String(data: data, encoding: .utf8) {
+        let data = try? JSONSerialization.data(withJSONObject: edits),
+        let string = String(data: data, encoding: .utf8)
+      {
         params["edits"] = string
       }
     }
@@ -542,7 +546,8 @@ public struct ResourceLink: Identifiable, Equatable, Sendable, Hashable {
   /// Extract display-friendly domain from the URL
   public var displayDomain: String {
     guard let urlObj = URL(string: url),
-          let host = urlObj.host else {
+      let host = urlObj.host
+    else {
       return url
     }
     return host

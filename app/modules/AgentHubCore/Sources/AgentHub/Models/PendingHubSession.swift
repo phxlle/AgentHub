@@ -21,6 +21,9 @@ public struct PendingHubSession: Identifiable {
   public let launchContext: String?
   public let dangerouslySkipPermissions: Bool
   public let permissionModePlan: Bool
+  /// Provider-specific identifiers that already existed before this process was launched.
+  /// Claude stores session IDs; Codex stores rollout file paths.
+  public let existingSessionIdentifiers: Set<String>
   /// nil = no worktree flag; "" = --worktree (auto-name); non-empty = --worktree <name>
   public let worktreeName: String?
 
@@ -32,6 +35,7 @@ public struct PendingHubSession: Identifiable {
     launchContext: String? = nil,
     dangerouslySkipPermissions: Bool = false,
     permissionModePlan: Bool = false,
+    existingSessionIdentifiers: Set<String> = [],
     worktreeName: String? = nil
   ) {
     self.id = UUID()
@@ -43,6 +47,7 @@ public struct PendingHubSession: Identifiable {
     self.launchContext = launchContext
     self.dangerouslySkipPermissions = dangerouslySkipPermissions
     self.permissionModePlan = permissionModePlan
+    self.existingSessionIdentifiers = existingSessionIdentifiers
     self.worktreeName = worktreeName
   }
 

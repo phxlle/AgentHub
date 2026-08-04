@@ -9,14 +9,14 @@ import AgentHubCLIKit
 import AgentHubGitDiff
 import AgentHubGitHub
 import AgentHubMCPUI
+import Canvas
+import Combine
+import CoreGraphics
 import Darwin
 import Foundation
-import Combine
-import Canvas
-import CoreGraphics
 
 #if canImport(AppKit)
-import AppKit
+  import AppKit
 #endif
 
 // MARK: - CLISessionsViewModel
@@ -57,18 +57,26 @@ public final class CLISessionsViewModel {
   /// snapshot). `pendingRefreshRequested` schedules exactly one trailing pass.
   @ObservationIgnored private var isRefreshing = false
   @ObservationIgnored private var pendingRefreshRequested = false
-  @ObservationIgnored private var accessoryDetectionTasks: [AccessoryDetectionContextKey: Task<Void, Never>] = [:]
+  @ObservationIgnored private var accessoryDetectionTasks:
+    [AccessoryDetectionContextKey: Task<Void, Never>] = [:]
   /// Live kqueue watchers for pending Hub sessions, keyed by pending id, so
   /// cancellation/resolution can release their directory descriptors.
-  @ObservationIgnored private var pendingSessionWatchers: [UUID: PendingSessionDirectoryWatcher] = [:]
+  @ObservationIgnored private var pendingSessionWatchers: [UUID: PendingSessionDirectoryWatcher] =
+    [:]
+  /// Prevents concurrent launches in the same directory from resolving to the same CLI session.
+  @ObservationIgnored private var pendingSessionClaims: [String: UUID] = [:]
   /// Per-session FIFO for file-watcher start/stop operations. Unordered
   /// fire-and-forget Tasks let a stop overtake an in-flight start (the start
   /// hops through the claim store first), which orphaned a live watcher whose
   /// session-file and sidecar descriptors were then never released.
-  @ObservationIgnored private var watcherLifecycleTasks: [String: (token: UUID, task: Task<Void, Never>)] = [:]
-  @ObservationIgnored private var activeAccessoryDetectionKeysByParent: [String: Set<AccessoryDetectionContextKey>] = [:]
-  @ObservationIgnored private var activeAccessoryRelationshipsByParent: [String: Set<AccessoryRelationshipIdentity>] = [:]
-  @ObservationIgnored private var pendingResolvedAccessoryRelationships: [String: [SessionRelationshipRecord]] = [:]
+  @ObservationIgnored private var watcherLifecycleTasks:
+    [String: (token: UUID, task: Task<Void, Never>)] = [:]
+  @ObservationIgnored private var activeAccessoryDetectionKeysByParent:
+    [String: Set<AccessoryDetectionContextKey>] = [:]
+  @ObservationIgnored private var activeAccessoryRelationshipsByParent:
+    [String: Set<AccessoryRelationshipIdentity>] = [:]
+  @ObservationIgnored private var pendingResolvedAccessoryRelationships:
+    [String: [SessionRelationshipRecord]] = [:]
   @ObservationIgnored private var scheduledTerminalFocusKeys: Set<String> = []
   @ObservationIgnored private var scheduledAuxiliaryShellFocusKeys: Set<String> = []
   weak var agentHubProvider: AgentHubProvider?
@@ -78,6 +86,7 @@ public final class CLISessionsViewModel {
   public private(set) var selectedRepositories: [SelectedRepository] = []
   public private(set) var lastFocusedSessionId: String?
   public private(set) var lastFocusedSessionAt: Date?
+  public private(set) var selectedFolderPaths: [String] = []
   public private(set) var loadingState: CLILoadingState = .idle
   public private(set) var browseSessionsLoadState: BrowseSessionsLoadState = .notLoaded
   public private(set) var error: Error?
@@ -109,7 +118,10 @@ public final class CLISessionsViewModel {
     public let isOrphaned: Bool
     public let parentRepoPath: String?
 
-    public init(worktree: WorktreeBranch, message: String, isOrphaned: Bool = false, parentRepoPath: String? = nil) {
+    public init(
+      worktree: WorktreeBranch, message: String, isOrphaned: Bool = false,
+      parentRepoPath: String? = nil
+    ) {
       self.worktree = worktree
       self.message = message
       self.isOrphaned = isOrphaned
@@ -289,7 +301,8 @@ public final class CLISessionsViewModel {
   }
 
   /// Per-server map: server tool name -> the MCP app it renders into (`_meta.ui.resourceUri`).
-  private var mcpAppToolTemplatesByServer: [MCPAppServerCacheKey: [String: MCPAppToolTemplate]] = [:]
+  private var mcpAppToolTemplatesByServer: [MCPAppServerCacheKey: [String: MCPAppToolTemplate]] =
+    [:]
   /// Servers whose `tools/list` has been resolved (avoid re-fetching).
   private var mcpAppResolvedServerKeys: Set<MCPAppServerCacheKey> = []
   /// Fetched app shells keyed by "serverName|projectPath|resourceUri".
@@ -341,7 +354,8 @@ public final class CLISessionsViewModel {
   /// banner. Empty host sets are never "granted" — there is nothing to allow.
   public func isMCPAppNetworkGranted(serverName: String, hosts: [String]) -> Bool {
     guard !hosts.isEmpty else { return false }
-    return grantedMCPAppNetworkKeys.contains(mcpAppNetworkGrantKey(serverName: serverName, hosts: hosts))
+    return grantedMCPAppNetworkKeys.contains(
+      mcpAppNetworkGrantKey(serverName: serverName, hosts: hosts))
   }
 
   /// Records the user's approval of this MCP app's declared network hosts for the
@@ -395,7 +409,9 @@ public final class CLISessionsViewModel {
         projectPath: normalizedProjectPath,
         serverName: invocation.serverName
       )
-      guard let template = mcpAppToolTemplatesByServer[serverKey]?[invocation.toolName] else { continue }
+      guard let template = mcpAppToolTemplatesByServer[serverKey]?[invocation.toolName] else {
+        continue
+      }
       let shellKey = mcpAppShellCacheKey(
         serverName: invocation.serverName,
         projectPath: normalizedProjectPath,
@@ -436,14 +452,17 @@ public final class CLISessionsViewModel {
         projectPath: normalizedProjectPath,
         serverName: invocation.serverName
       )
-      guard let template = mcpAppToolTemplatesByServer[serverKey]?[invocation.toolName] else { return nil }
+      guard let template = mcpAppToolTemplatesByServer[serverKey]?[invocation.toolName] else {
+        return nil
+      }
       let shellKey = mcpAppShellCacheKey(
         serverName: invocation.serverName,
         projectPath: normalizedProjectPath,
         uri: template.resourceUri
       )
       guard let shell = mcpAppShellsByKey[shellKey] else { return nil }
-      let title = cachedMCPAppTitle(for: invocation)
+      let title =
+        cachedMCPAppTitle(for: invocation)
         ?? template.title
         ?? shell.metadata.title
         ?? invocation.toolName
@@ -481,7 +500,8 @@ public final class CLISessionsViewModel {
       elements = array
     case .string(let json):
       guard let data = json.data(using: .utf8),
-            let parsed = try? JSONDecoder().decode([AgentHubMCPUIJSONValue].self, from: data) else {
+        let parsed = try? JSONDecoder().decode([AgentHubMCPUIJSONValue].self, from: data)
+      else {
         return nil
       }
       elements = parsed
@@ -490,7 +510,8 @@ public final class CLISessionsViewModel {
     }
 
     func cleaned(_ text: String?) -> String? {
-      guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+      guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty
+      else {
         return nil
       }
       return String(trimmed.prefix(48))
@@ -504,13 +525,16 @@ public final class CLISessionsViewModel {
     return elements.lazy.compactMap { cleaned($0["label"]?["text"]?.stringValue) }.first
   }
 
-  static func parseMCPAppToolTemplates(from toolsResult: AgentHubMCPUIJSONValue) -> [String: MCPAppToolTemplate] {
+  static func parseMCPAppToolTemplates(from toolsResult: AgentHubMCPUIJSONValue) -> [String:
+    MCPAppToolTemplate]
+  {
     guard let tools = toolsResult["tools"]?.arrayValue else { return [:] }
     var templates: [String: MCPAppToolTemplate] = [:]
     for tool in tools {
       guard let name = tool["name"]?.stringValue else { continue }
       let meta = tool["_meta"]
-      let uri = meta?["ui"]?["resourceUri"]?.stringValue
+      let uri =
+        meta?["ui"]?["resourceUri"]?.stringValue
         ?? meta?["ui/resourceUri"]?.stringValue
       guard let uri else { continue }
       templates[name] = MCPAppToolTemplate(resourceUri: uri, title: tool["title"]?.stringValue)
@@ -526,7 +550,8 @@ public final class CLISessionsViewModel {
     for content in contents {
       guard let text = content["text"]?.stringValue else { continue }
       let contentURI = content["uri"]?.stringValue ?? uri
-      let mimeType = content["mimeType"]?.stringValue
+      let mimeType =
+        content["mimeType"]?.stringValue
         ?? content["mime_type"]?.stringValue
         ?? AgentHubMCPUIResource.htmlAppMimeType
       let metadata = MCPAppResourceExtractor.metadata(from: content.anyValue)
@@ -550,7 +575,9 @@ public final class CLISessionsViewModel {
       if projectCapabilities[normalizedProjectPath] != nil {
         return
       }
-      if let cachedCapabilities = await projectCapabilityService.cachedCapabilities(for: normalizedProjectPath) {
+      if let cachedCapabilities = await projectCapabilityService.cachedCapabilities(
+        for: normalizedProjectPath)
+      {
         projectCapabilities[normalizedProjectPath] = cachedCapabilities
         return
       }
@@ -573,7 +600,9 @@ public final class CLISessionsViewModel {
         }
       }
 
-      if let cachedStatus = await webPreviewCandidateService.cachedCandidateStatus(for: normalizedProjectPath) {
+      if let cachedStatus = await webPreviewCandidateService.cachedCandidateStatus(
+        for: normalizedProjectPath)
+      {
         webPreviewCandidates[normalizedProjectPath] = cachedStatus
         return
       }
@@ -596,11 +625,14 @@ public final class CLISessionsViewModel {
       await diffAvailabilityService.invalidate(projectPath: normalizedProjectPath)
     } else {
       if let currentStatus = diffAvailability[normalizedProjectPath],
-         currentStatus.isAvailable || currentStatus.isChecking {
+        currentStatus.isAvailable || currentStatus.isChecking
+      {
         return
       }
 
-      if let cachedStatus = await diffAvailabilityService.cachedAvailability(for: normalizedProjectPath) {
+      if let cachedStatus = await diffAvailabilityService.cachedAvailability(
+        for: normalizedProjectPath)
+      {
         if diffAvailability[normalizedProjectPath] != cachedStatus {
           diffAvailability[normalizedProjectPath] = cachedStatus
         }
@@ -634,7 +666,8 @@ public final class CLISessionsViewModel {
         return
       }
 
-      if let cachedSummary = await localDiffSummaryService.cachedSummary(for: normalizedProjectPath) {
+      if let cachedSummary = await localDiffSummaryService.cachedSummary(for: normalizedProjectPath)
+      {
         if localDiffSummaries[normalizedProjectPath] != cachedSummary {
           localDiffSummaries[normalizedProjectPath] = cachedSummary
         }
@@ -671,10 +704,12 @@ public final class CLISessionsViewModel {
 
   /// Start polling for a session
   private func startPolling(session: CLISession) {
-    AppLogger.session.info("[Polling] startPolling called for session: \(session.id.prefix(8), privacy: .public)")
+    AppLogger.session.info(
+      "[Polling] startPolling called for session: \(session.id.prefix(8), privacy: .public)")
 
     guard monitoringCancellables[session.id] == nil else {
-      AppLogger.session.info("[Polling] Already polling session: \(session.id.prefix(8), privacy: .public)")
+      AppLogger.session.info(
+        "[Polling] Already polling session: \(session.id.prefix(8), privacy: .public)")
       return
     }
 
@@ -709,12 +744,14 @@ public final class CLISessionsViewModel {
         sessionFilePath: sessionFilePath
       )
     }
-    AppLogger.session.info("[Polling] Started polling for session: \(session.id.prefix(8), privacy: .public)")
+    AppLogger.session.info(
+      "[Polling] Started polling for session: \(session.id.prefix(8), privacy: .public)")
   }
 
   /// Stop polling for a session (when switching to terminal mode)
   private func stopPolling(sessionId: String) {
-    AppLogger.session.info("[Polling] stopPolling called for session: \(sessionId.prefix(8), privacy: .public)")
+    AppLogger.session.info(
+      "[Polling] stopPolling called for session: \(sessionId.prefix(8), privacy: .public)")
 
     monitoringCancellables.removeValue(forKey: sessionId)
     removeMonitorState(for: sessionId)
@@ -725,7 +762,8 @@ public final class CLISessionsViewModel {
       await fileWatcher.stopMonitoring(sessionId: sessionId)
       await claimStore?.release(sessionId: sessionId)
     }
-    AppLogger.session.info("[Polling] Stopped polling for session: \(sessionId.prefix(8), privacy: .public)")
+    AppLogger.session.info(
+      "[Polling] Stopped polling for session: \(sessionId.prefix(8), privacy: .public)")
   }
 
   /// Shows terminal view for a session with an initial prompt (for inline edit requests).
@@ -790,13 +828,38 @@ public final class CLISessionsViewModel {
     return true
   }
 
+  /// Delivers an orchestration handoff to a running session, resuming its embedded terminal when needed.
+  @discardableResult
+  public func sendAutomatedPrompt(to session: CLISession, prompt: String) -> Bool {
+    if sendPromptToActiveTerminal(forKey: session.id, prompt: prompt) {
+      return true
+    }
+
+    if !monitoredSessionIds.contains(session.id) {
+      startMonitoring(session: session)
+    }
+    let terminal = getOrCreateTerminal(
+      forKey: session.id,
+      sessionId: session.id,
+      projectPath: session.projectPath,
+      initialPrompt: nil
+    )
+    Task { @MainActor in
+      try? await Task.sleep(for: .seconds(1))
+      _ = terminal.submitPromptImmediately(prompt)
+    }
+    return true
+  }
+
   public func queueWebPreviewContext(_ element: ElementInspectorData, for sessionID: String) {
     var store = queuedWebPreviewContextStore
     store.append(element, for: sessionID)
     queuedWebPreviewContextStore = store
   }
 
-  public func queueWebPreviewUpdate(_ element: ElementInspectorData, instruction: String, for sessionID: String) {
+  public func queueWebPreviewUpdate(
+    _ element: ElementInspectorData, instruction: String, for sessionID: String
+  ) {
     var store = queuedWebPreviewContextStore
     store.append(element, instruction: instruction, for: sessionID)
     queuedWebPreviewContextStore = store
@@ -978,17 +1041,19 @@ public final class CLISessionsViewModel {
           worktreeName: worktreeName,
           metadataStore: metadataStore
         )
-      case let .shell(projectPath, isDark, shellPath):
+      case .shell(let projectPath, let isDark, let shellPath):
         surface.configureShell(projectPath: projectPath, isDark: isDark, shellPath: shellPath)
       }
     }
 
     func transferred(toSessionId sessionId: String) -> TerminalSurfaceDescriptor {
       switch self {
-      case let .cli(
+      case .cli(
         _,
-        projectPath,
-        cliConfiguration,
+        let
+          projectPath,
+        let
+          cliConfiguration,
         _,
         _,
         _,
@@ -1034,7 +1099,8 @@ public final class CLISessionsViewModel {
   ) {
     newTerminal.onUserInteraction = oldTerminal?.onUserInteraction
     newTerminal.onRequestShowEditor = oldTerminal?.onRequestShowEditor
-    newTerminal.consumeQueuedWebPreviewContextOnSubmit = oldTerminal?.consumeQueuedWebPreviewContextOnSubmit
+    newTerminal.consumeQueuedWebPreviewContextOnSubmit =
+      oldTerminal?.consumeQueuedWebPreviewContextOnSubmit
   }
 
   private func persistableWorkspaceSessionId(key: String, sessionId: String?) -> String? {
@@ -1108,7 +1174,8 @@ public final class CLISessionsViewModel {
             backend: terminalBackend
           )
         } catch {
-          AppLogger.session.error("Failed to save terminal workspace: \(error.localizedDescription)")
+          AppLogger.session.error(
+            "Failed to save terminal workspace: \(error.localizedDescription)")
         }
       }
       return
@@ -1116,7 +1183,8 @@ public final class CLISessionsViewModel {
 
     let providerKind = providerKind
     let terminalBackend = terminalBackend
-    terminalWorkspaceSaveTasks[sessionId] = Task { [weak self, store, snapshot, sessionId, providerKind, terminalBackend] in
+    terminalWorkspaceSaveTasks[sessionId] = Task {
+      [weak self, store, snapshot, sessionId, providerKind, terminalBackend] in
       try? await Task.sleep(for: .milliseconds(250))
       guard !Task.isCancelled else { return }
 
@@ -1182,15 +1250,16 @@ public final class CLISessionsViewModel {
     parentTerminalKey: String,
     parentSessionId: String?
   ) {
-    let linked = Set(snapshot.panels.flatMap { panel in
-      panel.tabs.compactMap { tab -> AccessoryRelationshipIdentity? in
-        guard let linkedSession = tab.linkedSession else { return nil }
-        return AccessoryRelationshipIdentity(
-          targetProvider: linkedSession.provider,
-          targetSessionId: linkedSession.sessionId
-        )
-      }
-    })
+    let linked = Set(
+      snapshot.panels.flatMap { panel in
+        panel.tabs.compactMap { tab -> AccessoryRelationshipIdentity? in
+          guard let linkedSession = tab.linkedSession else { return nil }
+          return AccessoryRelationshipIdentity(
+            targetProvider: linkedSession.provider,
+            targetSessionId: linkedSession.sessionId
+          )
+        }
+      })
 
     let previous = activeAccessoryRelationshipsByParent[parentTerminalKey] ?? []
     activeAccessoryRelationshipsByParent[parentTerminalKey] = linked
@@ -1209,11 +1278,15 @@ public final class CLISessionsViewModel {
   private func accessoryShellContexts(
     from snapshot: TerminalWorkspaceSnapshot,
     parentTerminalKey: String
-  ) -> [(key: AccessoryDetectionContextKey, projectPath: String, startedAt: Date, baseline: AccessorySessionDetectionBaseline)] {
-    var contexts: [(AccessoryDetectionContextKey, String, Date, AccessorySessionDetectionBaseline)] = []
+  ) -> [(
+    key: AccessoryDetectionContextKey, projectPath: String, startedAt: Date,
+    baseline: AccessorySessionDetectionBaseline
+  )] {
+    var contexts:
+      [(AccessoryDetectionContextKey, String, Date, AccessorySessionDetectionBaseline)] = []
     for (panelIndex, panel) in snapshot.panels.enumerated() where panel.role == .auxiliary {
       for (tabIndex, tab) in panel.tabs.enumerated()
-        where tab.role == .shell && tab.linkedSession == nil {
+      where tab.role == .shell && tab.linkedSession == nil {
         guard let projectPath = nonEmpty(tab.workingDirectory) else { continue }
         for provider in SessionProviderKind.allCases {
           let startedAt = Date()
@@ -1240,13 +1313,15 @@ public final class CLISessionsViewModel {
     _ pending: PendingAccessoryDetection,
     contextKey: AccessoryDetectionContextKey? = nil
   ) {
-    let taskKey = contextKey ?? AccessoryDetectionContextKey(
-      parentTerminalKey: pending.parentTerminalKey,
-      provider: pending.targetProvider,
-      panelIndex: -1,
-      tabIndex: -1,
-      projectPath: pending.projectPath
-    )
+    let taskKey =
+      contextKey
+      ?? AccessoryDetectionContextKey(
+        parentTerminalKey: pending.parentTerminalKey,
+        provider: pending.targetProvider,
+        panelIndex: -1,
+        tabIndex: -1,
+        projectPath: pending.projectPath
+      )
 
     accessoryDetectionTasks[taskKey]?.cancel()
     accessoryDetectionTasks[taskKey] = Task { [weak self, pending, taskKey] in
@@ -1277,15 +1352,17 @@ public final class CLISessionsViewModel {
     _ pending: PendingAccessoryDetection,
     result: AccessorySessionDetectionResult
   ) {
-    let didMarkPane = activeTerminals[pending.parentTerminalKey]?.markAccessorySession(
-      provider: result.provider,
-      sessionId: result.sessionId,
-      projectPath: result.projectPath,
-      origin: pending.origin
-    ) ?? false
+    let didMarkPane =
+      activeTerminals[pending.parentTerminalKey]?.markAccessorySession(
+        provider: result.provider,
+        sessionId: result.sessionId,
+        projectPath: result.projectPath,
+        origin: pending.origin
+      ) ?? false
     guard didMarkPane else { return }
 
-    let parentSessionId = pending.parentSessionId
+    let parentSessionId =
+      pending.parentSessionId
       ?? (pending.parentTerminalKey.hasPrefix("pending-") ? nil : pending.parentTerminalKey)
 
     if let parentSessionId {
@@ -1305,12 +1382,14 @@ public final class CLISessionsViewModel {
         kind: .accessoryChild,
         origin: pending.origin
       )
-      pendingResolvedAccessoryRelationships[pending.parentTerminalKey, default: []].append(relationship)
+      pendingResolvedAccessoryRelationships[pending.parentTerminalKey, default: []].append(
+        relationship)
     }
 
     if let terminal = activeTerminals[pending.parentTerminalKey],
-       let snapshot = terminal.captureWorkspaceSnapshot(),
-       let parentSessionId {
+      let snapshot = terminal.captureWorkspaceSnapshot(),
+      let parentSessionId
+    {
       scheduleTerminalWorkspaceSave(snapshot, sessionId: parentSessionId, debounce: false)
     }
   }
@@ -1335,7 +1414,8 @@ public final class CLISessionsViewModel {
       do {
         try await store.saveSessionRelationship(relationship)
       } catch {
-        AppLogger.session.error("Failed to save accessory session relationship: \(error.localizedDescription)")
+        AppLogger.session.error(
+          "Failed to save accessory session relationship: \(error.localizedDescription)")
       }
     }
   }
@@ -1357,7 +1437,8 @@ public final class CLISessionsViewModel {
           kind: .accessoryChild
         )
       } catch {
-        AppLogger.session.error("Failed to delete accessory session relationship: \(error.localizedDescription)")
+        AppLogger.session.error(
+          "Failed to delete accessory session relationship: \(error.localizedDescription)")
       }
     }
   }
@@ -1383,24 +1464,28 @@ public final class CLISessionsViewModel {
     activeAccessoryRelationshipsByParent.removeValue(forKey: parentKey)
 
     guard let terminal = activeTerminals[sessionId],
-          let snapshot = terminal.captureWorkspaceSnapshot() else {
+      let snapshot = terminal.captureWorkspaceSnapshot()
+    else {
       return
     }
-    syncAccessoryDetectionContexts(snapshot, parentTerminalKey: sessionId, parentSessionId: sessionId)
+    syncAccessoryDetectionContexts(
+      snapshot, parentTerminalKey: sessionId, parentSessionId: sessionId)
   }
 
   private func persistPendingAccessoryRelationships(
     parentKey: String,
     resolvedParentSessionId: String
   ) {
-    guard let relationships = pendingResolvedAccessoryRelationships.removeValue(forKey: parentKey) else {
+    guard let relationships = pendingResolvedAccessoryRelationships.removeValue(forKey: parentKey)
+    else {
       return
     }
 
     for relationship in relationships {
       guard let sourceProvider = relationship.sourceProviderKind,
-            let targetProvider = relationship.targetProviderKind,
-            let origin = relationship.relationshipOrigin else {
+        let targetProvider = relationship.targetProviderKind,
+        let origin = relationship.relationshipOrigin
+      else {
         continue
       }
       saveAccessoryRelationship(
@@ -1445,11 +1530,10 @@ public final class CLISessionsViewModel {
   ) -> any EmbeddedTerminalSurface {
     let config = cliConfiguration ?? self.currentCLIConfiguration
     let queuedInputText = consumePendingTerminalInputText(for: key)
-    let isNewSession = (
-      sessionId == nil
+    let isNewSession =
+      (sessionId == nil
         || sessionId?.isEmpty == true
-        || sessionId?.hasPrefix("pending-") == true
-    )
+        || sessionId?.hasPrefix("pending-") == true)
     let launchInitialPrompt = isNewSession ? initialPrompt : nil
     // Resume launches re-read persisted context from the metadata store; the
     // in-memory copy only rides along for brand-new sessions.
@@ -1494,7 +1578,7 @@ public final class CLISessionsViewModel {
     }
 
     #if DEBUG
-    AppLogger.session.debug("[Terminal] CREATING new terminal for key: \(key, privacy: .public)")
+      AppLogger.session.debug("[Terminal] CREATING new terminal for key: \(key, privacy: .public)")
     #endif
     let createDescriptor = TerminalSurfaceDescriptor.cli(
       sessionId: sessionId,
@@ -1511,7 +1595,9 @@ public final class CLISessionsViewModel {
     activeTerminalDescriptors[key] = createDescriptor
     let terminal = makeTerminalSurface(forKey: key, descriptor: createDescriptor)
     configureTerminalWorkspacePersistence(for: terminal, key: key, sessionId: sessionId)
-    if let workspaceSnapshot = loadTerminalWorkspaceSnapshot(sessionId: persistableWorkspaceSessionId(key: key, sessionId: sessionId)) {
+    if let workspaceSnapshot = loadTerminalWorkspaceSnapshot(
+      sessionId: persistableWorkspaceSessionId(key: key, sessionId: sessionId))
+    {
       terminal.restoreWorkspaceSnapshot(workspaceSnapshot)
     }
     if let snapshot = terminal.captureWorkspaceSnapshot() {
@@ -1533,7 +1619,8 @@ public final class CLISessionsViewModel {
     projectPath: String,
     isDark: Bool = true
   ) -> any EmbeddedTerminalSurface {
-    let descriptor = TerminalSurfaceDescriptor.shell(projectPath: projectPath, isDark: isDark, shellPath: nil)
+    let descriptor = TerminalSurfaceDescriptor.shell(
+      projectPath: projectPath, isDark: isDark, shellPath: nil)
 
     if let existing = auxiliaryShellTerminals[key] {
       if auxiliaryShellTerminalDescriptors[key] == nil {
@@ -1544,7 +1631,8 @@ public final class CLISessionsViewModel {
     }
 
     #if DEBUG
-    AppLogger.session.debug("[AuxShell] CREATING auxiliary shell for key: \(key, privacy: .public)")
+      AppLogger.session.debug(
+        "[AuxShell] CREATING auxiliary shell for key: \(key, privacy: .public)")
     #endif
     auxiliaryShellTerminalDescriptors[key] = descriptor
     let terminal = makeTerminalSurface(forKey: key, descriptor: descriptor)
@@ -1567,12 +1655,14 @@ public final class CLISessionsViewModel {
       startedAt: startedAt
     )
     let childConfiguration = cliConfiguration(for: childProvider)
-    guard let context = terminal.openAccessorySessionPane(
-      provider: childProvider,
-      cliConfiguration: childConfiguration,
-      projectPath: projectPath,
-      metadataStore: metadataStore
-    ) else {
+    guard
+      let context = terminal.openAccessorySessionPane(
+        provider: childProvider,
+        cliConfiguration: childConfiguration,
+        projectPath: projectPath,
+        metadataStore: metadataStore
+      )
+    else {
       return
     }
 
@@ -1610,7 +1700,8 @@ public final class CLISessionsViewModel {
       activeTerminals[sessionId] = terminal
       terminal.updateContext(terminalSessionKey: sessionId, sessionViewModel: self)
       configureTerminalWorkspacePersistence(for: terminal, key: sessionId, sessionId: sessionId)
-      persistCurrentWorkspaceIfNeeded(for: terminal, key: sessionId, sessionId: sessionId, debounce: false)
+      persistCurrentWorkspaceIfNeeded(
+        for: terminal, key: sessionId, sessionId: sessionId, debounce: false)
     }
     if let descriptor = activeTerminalDescriptors.removeValue(forKey: pendingKey) {
       activeTerminalDescriptors[sessionId] = descriptor.transferred(toSessionId: sessionId)
@@ -1630,7 +1721,9 @@ public final class CLISessionsViewModel {
   }
 
   /// Transfers the auxiliary shell terminal from pending key to real session ID.
-  public func transferAuxiliaryShellTerminal(fromPendingId pendingId: UUID, toSessionId sessionId: String) {
+  public func transferAuxiliaryShellTerminal(
+    fromPendingId pendingId: UUID, toSessionId sessionId: String
+  ) {
     let pendingKey = "pending-\(pendingId.uuidString)"
     if let terminal = auxiliaryShellTerminals.removeValue(forKey: pendingKey) {
       auxiliaryShellTerminals[sessionId] = terminal
@@ -1662,7 +1755,9 @@ public final class CLISessionsViewModel {
     let newTerminal = makeTerminalSurface(forKey: key, descriptor: descriptor)
     copyTerminalCallbacks(from: oldTerminal, to: newTerminal)
     configureTerminalWorkspacePersistence(for: newTerminal, key: key, sessionId: sessionId)
-    if let workspaceSnapshot = loadTerminalWorkspaceSnapshot(sessionId: persistableWorkspaceSessionId(key: key, sessionId: sessionId)) {
+    if let workspaceSnapshot = loadTerminalWorkspaceSnapshot(
+      sessionId: persistableWorkspaceSessionId(key: key, sessionId: sessionId))
+    {
       newTerminal.restoreWorkspaceSnapshot(workspaceSnapshot)
     }
     if let snapshot = newTerminal.captureWorkspaceSnapshot() {
@@ -1716,7 +1811,8 @@ public final class CLISessionsViewModel {
   }
 
   public func recreateTerminalsForSelectedBackend() {
-    AppLogger.session.info("Terminal backend changes require app restart; keeping existing terminals alive")
+    AppLogger.session.info(
+      "Terminal backend changes require app restart; keeping existing terminals alive")
   }
 
   /// Sessions being started in Hub's embedded terminal (no session ID yet)
@@ -1726,6 +1822,10 @@ public final class CLISessionsViewModel {
   /// Used by the sidebar to update `primarySessionId` when a pending session becomes real.
   public var resolvedPendingSessions: [UUID: String] = [:]
 
+  /// Stable pending-to-session history. Unlike `resolvedPendingSessions`, this is not consumed by
+  /// the Sessions UI and can therefore be used to bind a launch to its originating workflow.
+  public private(set) var resolvedPendingSessionHistory: [UUID: String] = [:]
+
   /// Set when a new pending session is created; observed by the sidebar to auto-select it.
   /// The sidebar nils this out after reading it.
   public var lastCreatedPendingId: UUID?
@@ -1733,12 +1833,14 @@ public final class CLISessionsViewModel {
   /// Active agent terminal views keyed by session key.
   /// Preserves terminal PTY across pending → real session transition.
   public var activeTerminals: [String: any EmbeddedTerminalSurface] = [:]
-  @ObservationIgnored private var activeTerminalDescriptors: [String: TerminalSurfaceDescriptor] = [:]
+  @ObservationIgnored private var activeTerminalDescriptors: [String: TerminalSurfaceDescriptor] =
+    [:]
 
   /// Active auxiliary shell terminals keyed by session key.
   /// Preserves shell PTY across session selection changes and pending → real transitions.
   public var auxiliaryShellTerminals: [String: any EmbeddedTerminalSurface] = [:]
-  @ObservationIgnored private var auxiliaryShellTerminalDescriptors: [String: TerminalSurfaceDescriptor] = [:]
+  @ObservationIgnored private var auxiliaryShellTerminalDescriptors:
+    [String: TerminalSurfaceDescriptor] = [:]
 
   public var managedTerminalEntries: [(key: String, terminal: any EmbeddedTerminalSurface)] {
     activeTerminals.map { ($0.key, $0.value) }
@@ -1772,6 +1874,10 @@ public final class CLISessionsViewModel {
   /// renders directly (and the only part status-mode grouping needs).
   public private(set) var sessionStatuses: [String: SessionStatus] = [:]
 
+  /// Latest complete assistant response per monitored session.
+  /// Updated only when the text changes so workflow automation can observe turn completion cheaply.
+  public private(set) var sessionLastAssistantMessages: [String: String] = [:]
+
   /// PR references detected in a session's output.
   ///
   /// Deliberately the *derived* references rather than the raw `ResourceLink`s:
@@ -1779,11 +1885,16 @@ public final class CLISessionsViewModel {
   /// array never compares equal across publishes and would defeat the
   /// write-on-change guard. A `GitHubPullRequestURLReference` is a pure function
   /// of the URL string, so it compares stably.
-  public private(set) var sessionPullRequestReferences: [String: [GitHubPullRequestURLReference]] = [:]
+  public private(set) var sessionPullRequestReferences: [String: [GitHubPullRequestURLReference]] =
+    [:]
 
   /// Status for a monitored session, or `nil` if it has not reported yet.
   public func sessionStatus(for sessionId: String) -> SessionStatus? {
     sessionStatuses[sessionId]
+  }
+
+  public func lastAssistantMessage(for sessionId: String) -> String? {
+    sessionLastAssistantMessages[sessionId]
   }
 
   /// PR references detected for a monitored session.
@@ -1841,18 +1952,23 @@ public final class CLISessionsViewModel {
     providerKind: SessionProviderKind,
     metadataStore: SessionMetadataStore? = nil,
     sessionRelationshipStore: (any SessionRelationshipStoreProtocol)? = nil,
-    webPreviewCandidateService: any WebPreviewCandidateServiceProtocol = WebPreviewCandidateService.shared,
+    webPreviewCandidateService: any WebPreviewCandidateServiceProtocol = WebPreviewCandidateService
+      .shared,
     mcpAppDiscoveryService: any MCPAppDiscoveryServiceProtocol = MCPAppDiscoveryService.shared,
-    projectCapabilityService: any ProjectCapabilityServiceProtocol = ProjectCapabilityService.shared,
+    projectCapabilityService: any ProjectCapabilityServiceProtocol = ProjectCapabilityService
+      .shared,
     diffAvailabilityService: any DiffAvailabilityServiceProtocol = DiffAvailabilityService.shared,
     localDiffSummaryService: any LocalDiffSummaryServiceProtocol = LocalDiffSummaryService.shared,
-    approvalNotificationService: any ApprovalNotificationServiceProtocol = ApprovalNotificationService.shared,
-    accessorySessionDetectionService: any AccessorySessionDetectionServiceProtocol = AccessorySessionDetectionService(),
+    approvalNotificationService: any ApprovalNotificationServiceProtocol =
+      ApprovalNotificationService.shared,
+    accessorySessionDetectionService: any AccessorySessionDetectionServiceProtocol =
+      AccessorySessionDetectionService(),
     approvalClaimStore: (any ApprovalClaimStoreProtocol)? = nil,
     hookInstaller: (any ClaudeHookInstallerProtocol)? = nil,
     codexDataPath: String? = nil,
     worktreeRemovalService: any GitWorktreeRemovalServiceProtocol = GitWorktreeService(),
-    terminalSurfaceFactory: any EmbeddedTerminalSurfaceFactory = DefaultEmbeddedTerminalSurfaceFactory(),
+    terminalSurfaceFactory: any EmbeddedTerminalSurfaceFactory =
+      DefaultEmbeddedTerminalSurfaceFactory(),
     terminalBackend: EmbeddedTerminalBackend = .storedPreference,
     terminalWorkspaceStore: (any TerminalWorkspaceStoreProtocol)? = nil
   ) {
@@ -1885,7 +2001,11 @@ public final class CLISessionsViewModel {
     self.approvalTimeoutSeconds = savedTimeout > 0 ? savedTimeout : 5
 
     // Set loading state synchronously so the UI never shows empty state during restoration
-    if metadataStore?.getWorkspaceStateSync(for: providerKind).selectedRepositoryPaths.isEmpty == false {
+    let persistedWorkspaceState = metadataStore?.getWorkspaceStateSync(for: providerKind)
+    selectedFolderPaths = persistedWorkspaceState?.selectedFolderPaths ?? []
+    if persistedWorkspaceState?.selectedRepositoryPaths.isEmpty == false
+      || persistedWorkspaceState?.selectedFolderPaths.isEmpty == false
+    {
       loadingState = .restoringRepositories
     }
 
@@ -1945,8 +2065,10 @@ public final class CLISessionsViewModel {
 
   /// Resolves the real session currently hosted by an embedded CLI process.
   public func activeSessionId(forProcessId processId: Int32) -> String? {
-    let candidates = activeTerminals.compactMap { sessionId, terminal -> SessionProcessGroupMatcher.Candidate? in
-      guard !sessionId.hasPrefix("pending-"), let terminalProcessId = terminal.currentProcessPID else {
+    let candidates = activeTerminals.compactMap {
+      sessionId, terminal -> SessionProcessGroupMatcher.Candidate? in
+      guard !sessionId.hasPrefix("pending-"), let terminalProcessId = terminal.currentProcessPID
+      else {
         return nil
       }
       return SessionProcessGroupMatcher.Candidate(
@@ -2372,8 +2494,10 @@ public final class CLISessionsViewModel {
         await MainActor.run { [weak self] in
           guard let self = self else { return }
 
-          if (self.loadingState == .restoringRepositories || self.loadingState == .restoringMonitoredSessions),
-             repositories.isEmpty {
+          if self.loadingState == .restoringRepositories
+            || self.loadingState == .restoringMonitoredSessions,
+            repositories.isEmpty
+          {
             return
           }
 
@@ -2509,7 +2633,9 @@ public final class CLISessionsViewModel {
     repositories.map { repository in
       var filtered = repository
       filtered.worktrees = repository.worktrees.filter { worktree in
-        !worktree.isWorktree || ownedWorktreePaths.contains(WorktreeModuleResolver.normalizedDirectoryPath(worktree.path))
+        !worktree.isWorktree
+          || ownedWorktreePaths.contains(
+            WorktreeModuleResolver.normalizedDirectoryPath(worktree.path))
       }
       return filtered
     }
@@ -2584,7 +2710,8 @@ public final class CLISessionsViewModel {
         return
       }
       canPersistWorkspaceState = true
-      let paths = workspaceState.selectedRepositoryPaths
+      selectedFolderPaths = workspaceState.selectedFolderPaths
+      let paths = await restoredRepositoryPaths(from: workspaceState)
       // Retain every saved session ID before any restore step can fail. Even if
       // repositories or worktrees are unavailable this launch, the IDs keep
       // riding along in workspace-state writes and retry on the next launch.
@@ -2612,26 +2739,32 @@ public final class CLISessionsViewModel {
       for path in paths {
         let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
         if let info = await GitWorktreeDetector.detectWorktreeInfo(for: normalizedPath),
-           info.isWorktree {
+          info.isWorktree
+        {
           restoredOwnedWorktreePaths.insert(normalizedPath)
         }
       }
       if !sessionIdsToRestore.isEmpty,
-         let mappings = try? await metadataStore?.getRepoMappings(for: Array(sessionIdsToRestore)) {
-        var restoredRepositoryPaths = Set(paths.map { WorktreeModuleResolver.normalizedDirectoryPath($0) })
+        let mappings = try? await metadataStore?.getRepoMappings(for: Array(sessionIdsToRestore))
+      {
+        var restoredRepositoryPaths = Set(
+          paths.map { WorktreeModuleResolver.normalizedDirectoryPath($0) })
         for path in paths {
           let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
           if let info = await GitWorktreeDetector.detectWorktreeInfo(for: normalizedPath),
-             info.isWorktree,
-             let mainRepoPath = info.mainRepoPath {
-            restoredRepositoryPaths.insert(WorktreeModuleResolver.normalizedDirectoryPath(mainRepoPath))
+            info.isWorktree,
+            let mainRepoPath = info.mainRepoPath
+          {
+            restoredRepositoryPaths.insert(
+              WorktreeModuleResolver.normalizedDirectoryPath(mainRepoPath))
           }
         }
         for mapping in mappings.values {
           let parentPath = WorktreeModuleResolver.normalizedDirectoryPath(mapping.parentRepoPath)
           let worktreePath = WorktreeModuleResolver.normalizedDirectoryPath(mapping.worktreePath)
           guard restoredRepositoryPaths.contains(parentPath),
-                worktreePath != parentPath else {
+            worktreePath != parentPath
+          else {
             continue
           }
           restoredOwnedWorktreePaths.insert(worktreePath)
@@ -2681,22 +2814,64 @@ public final class CLISessionsViewModel {
     }
   }
 
-  private func restoreLoadedMonitoredSessions(_ sessions: [CLISession], allowedProjectRoots: [String]) {
+  private func restoredRepositoryPaths(
+    from workspaceState: SessionWorkspaceState
+  ) async -> [String] {
+    let folderPaths = workspaceState.selectedFolderPaths.map {
+      WorktreeModuleResolver.normalizedDirectoryPath($0)
+    }
+    var restoredPaths = workspaceState.selectedRepositoryPaths.filter { path in
+      !folderPaths.contains { SessionFolderDiscovery.isDirectChild(path, of: $0) }
+    }
+
+    for folderPath in folderPaths {
+      let discoveredPaths = await Task.detached(priority: .userInitiated) {
+        SessionFolderDiscovery.directChildDirectoryPaths(at: folderPath)
+      }.value
+
+      var isDirectory: ObjCBool = false
+      let folderExists =
+        FileManager.default.fileExists(
+          atPath: folderPath,
+          isDirectory: &isDirectory
+        ) && isDirectory.boolValue
+      if discoveredPaths.isEmpty && !folderExists {
+        restoredPaths.append(
+          contentsOf: workspaceState.selectedRepositoryPaths.filter {
+            SessionFolderDiscovery.isDirectChild($0, of: folderPath)
+          })
+      } else {
+        restoredPaths.append(contentsOf: discoveredPaths)
+      }
+    }
+
+    var seen: Set<String> = []
+    return restoredPaths.compactMap { path in
+      let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
+      return seen.insert(normalizedPath).inserted ? normalizedPath : nil
+    }
+  }
+
+  private func restoreLoadedMonitoredSessions(
+    _ sessions: [CLISession], allowedProjectRoots: [String]
+  ) {
     guard !sessions.isEmpty else { return }
 
     // Pinned sessions restore even when their project directory vanished
     // (deleted worktree): the transcript still exists and the pinned section
     // is where the user expects to keep finding them.
     let restorableSessions = sessions.filter {
-      pinnedSessionIds.contains($0.id) ||
-        isProjectPath($0.projectPath, containedInAnyOf: allowedProjectRoots)
+      pinnedSessionIds.contains($0.id)
+        || isProjectPath($0.projectPath, containedInAnyOf: allowedProjectRoots)
     }
     let rejectedIds = Set(sessions.map(\.id)).subtracting(restorableSessions.map(\.id))
     if !rejectedIds.isEmpty {
       pendingRestorationSessionIds.subtract(rejectedIds)
       let confirmedGoneIds = Set(
         sessions
-          .filter { rejectedIds.contains($0.id) && !FileManager.default.fileExists(atPath: $0.projectPath) }
+          .filter {
+            rejectedIds.contains($0.id) && !FileManager.default.fileExists(atPath: $0.projectPath)
+          }
           .map(\.id)
       )
       unrestoredSessionIds.subtract(confirmedGoneIds)
@@ -2732,8 +2907,8 @@ public final class CLISessionsViewModel {
 
     for repoIndex in selectedRepositories.indices {
       var shouldExpandRepo = paths.contains { path in
-        path == selectedRepositories[repoIndex].path ||
-        path.hasPrefix(selectedRepositories[repoIndex].path + "/")
+        path == selectedRepositories[repoIndex].path
+          || path.hasPrefix(selectedRepositories[repoIndex].path + "/")
       }
 
       for worktreeIndex in selectedRepositories[repoIndex].worktrees.indices {
@@ -2764,7 +2939,8 @@ public final class CLISessionsViewModel {
 
     for sessionId in pendingRestorationSessionIds {
       if let session = findSession(byId: sessionId),
-         sessionFileExists(session: session) {
+        sessionFileExists(session: session)
+      {
         // Populate monitoring state directly (skip persistence — persisted state is already correct)
         monitoredSessionIds.insert(session.id)
         monitoredSessionBackup[session.id] = session
@@ -2812,12 +2988,14 @@ public final class CLISessionsViewModel {
       }
     }
 
-    let sessionIdsToPersist = monitoredSessionIds
+    let sessionIdsToPersist =
+      monitoredSessionIds
       .union(pendingRestorationSessionIds)
       .union(unrestoredSessionIds)
 
     return SessionWorkspaceState(
       selectedRepositoryPaths: selectedRepositories.map(\.path),
+      selectedFolderPaths: selectedFolderPaths,
       monitoredSessionIds: Array(sessionIdsToPersist).sorted(),
       ownedWorktreePaths: Array(ownedWorktreePaths).sorted(),
       expansionState: state
@@ -2885,9 +3063,10 @@ public final class CLISessionsViewModel {
     unrestoredSessionIds.formUnion(sessionIds)
     syncFocusedSessionIdsToMonitor(extraSessionIds: sessionIds)
 
-    let projectPaths = Set(references.map {
-      WorktreeModuleResolver.normalizedDirectoryPath($0.projectPath)
-    })
+    let projectPaths = Set(
+      references.map {
+        WorktreeModuleResolver.normalizedDirectoryPath($0.projectPath)
+      })
     for projectPath in projectPaths.sorted() {
       await ensureWorkspaceSessionRepository(at: projectPath)
     }
@@ -2985,7 +3164,8 @@ public final class CLISessionsViewModel {
 
     for sessionId in sessionIdsToRestore {
       if let session = findSession(byId: sessionId),
-         sessionFileExists(session: session) {
+        sessionFileExists(session: session)
+      {
         startMonitoring(session: session)
       }
     }
@@ -3063,21 +3243,21 @@ public final class CLISessionsViewModel {
   /// avoiding HIRunLoopSemaphore deadlock that occurs during GCD dispatch queue drain.
   public func showAddRepositoryPicker() {
     #if canImport(AppKit)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-      MainActor.assumeIsolated {
-        let panel = NSOpenPanel()
-        panel.title = "Select Repository"
-        panel.message = "Choose a git repository to monitor CLI sessions"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        MainActor.assumeIsolated {
+          let panel = NSOpenPanel()
+          panel.title = "Add Sessions Folder"
+          panel.message = "Choose a repository or a folder containing projects"
+          panel.canChooseFiles = false
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.canCreateDirectories = false
 
-        if panel.runModal() == .OK, let url = panel.url {
-          self.addRepository(at: url.path)
+          if panel.runModal() == .OK, let url = panel.url {
+            self.addFolder(at: url.path)
+          }
         }
       }
-    }
     #endif
   }
 
@@ -3100,10 +3280,67 @@ public final class CLISessionsViewModel {
     }
   }
 
+  /// Adds a folder selected from the Sessions picker. Git repositories retain
+  /// the existing single-repository behavior. Other folders monitor exactly
+  /// their direct visible child directories as one persisted folder group.
+  public func addFolder(at path: String) {
+    let folderName = URL(fileURLWithPath: path).lastPathComponent
+    Task {
+      loadingState = .addingRepository(name: folderName)
+      let previousBrowseSessionsLoadState = browseSessionsLoadState
+      browseSessionsLoadState = .loading
+
+      let selection = await SessionFolderDiscovery.selection(at: path)
+      if selection.isFolderGroup,
+        !selectedFolderPaths.contains(selection.rootPath)
+      {
+        selectedFolderPaths.append(selection.rootPath)
+      }
+
+      if selection.repositoryPaths.count == 1,
+        let repositoryPath = selection.repositoryPaths.first
+      {
+        await focusWorktreeIfNeeded(at: repositoryPath)
+        _ = await monitorService.addRepository(repositoryPath)
+      } else {
+        await monitorService.addRepositories(selection.repositoryPaths)
+      }
+
+      let repositories = await monitorService.getSelectedRepositories()
+      selectedRepositories = mergePreservingExpandedState(
+        current: selectedRepositories,
+        updated: repositories
+      )
+      persistSelectedRepositories()
+      browseSessionsLoadState = .loaded
+      loadingState = .idle
+
+      if selection.repositoryPaths.isEmpty {
+        browseSessionsLoadState = previousBrowseSessionsLoadState
+      }
+    }
+  }
+
+  public func removeFolder(at path: String) {
+    let rootPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
+    selectedFolderPaths.removeAll {
+      WorktreeModuleResolver.normalizedDirectoryPath($0) == rootPath
+    }
+    persistSelectedRepositories()
+
+    let repositories = selectedRepositories.filter {
+      SessionFolderDiscovery.isDirectChild($0.path, of: rootPath)
+    }
+    for repository in repositories {
+      removeRepository(repository)
+    }
+  }
+
   private func focusWorktreeIfNeeded(at path: String) async {
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
     guard let info = await GitWorktreeDetector.detectWorktreeInfo(for: normalizedPath),
-          info.isWorktree else {
+      info.isWorktree
+    else {
       return
     }
     await setOwnedWorktreePaths(ownedWorktreePaths.union([normalizedPath]))
@@ -3122,7 +3359,8 @@ public final class CLISessionsViewModel {
     }
 
     // Stop monitoring all sessions from this repository
-    let sessionIdsToStop = monitoredSessionIdsToStop(whenRemoving: repository, projectRoots: repositoryPaths)
+    let sessionIdsToStop = monitoredSessionIdsToStop(
+      whenRemoving: repository, projectRoots: repositoryPaths)
     for sessionId in sessionIdsToStop {
       stopMonitoring(sessionId: sessionId)
     }
@@ -3212,10 +3450,11 @@ public final class CLISessionsViewModel {
       monitoredSessionBackup[session.id] = session
 
       if session.isWorktree {
-        let worktreePath = WorktreeModuleResolver.bestMatch(
-          for: session.projectPath,
-          repositories: selectedRepositories
-        )?.worktree.path ?? session.projectPath
+        let worktreePath =
+          WorktreeModuleResolver.bestMatch(
+            for: session.projectPath,
+            repositories: selectedRepositories
+          )?.worktree.path ?? session.projectPath
         importedWorktreePaths.insert(WorktreeModuleResolver.normalizedDirectoryPath(worktreePath))
       }
     }
@@ -3277,13 +3516,17 @@ public final class CLISessionsViewModel {
 
     do {
       if let parentRepoPath = findParentRepoPath(for: worktree) {
-        try await worktreeRemovalService.removeWorktree(at: worktree.path, relativeTo: parentRepoPath, force: force)
+        try await worktreeRemovalService.removeWorktree(
+          at: worktree.path, relativeTo: parentRepoPath, force: force)
       } else if FileManager.default.fileExists(atPath: worktree.path) {
         try await worktreeRemovalService.removeWorktree(at: worktree.path, force: force)
       } else {
-        throw NSError(domain: "AgentHub", code: 1, userInfo: [
-          NSLocalizedDescriptionKey: "Cannot find parent repository for worktree at \(worktree.path)"
-        ])
+        throw NSError(
+          domain: "AgentHub", code: 1,
+          userInfo: [
+            NSLocalizedDescriptionKey:
+              "Cannot find parent repository for worktree at \(worktree.path)"
+          ])
       }
       archiveMonitoredSessions(inWorktreePath: worktree.path)
       removeOwnedWorktreePath(worktree.path)
@@ -3295,7 +3538,8 @@ public final class CLISessionsViewModel {
       // [CLISessionsVM] Failed to delete worktree: \(error.localizedDescription)")
       // Check if this is an orphaned worktree
       if let orphanInfo = worktreeRemovalService.checkIfOrphaned(at: worktree.path),
-         orphanInfo.isOrphaned {
+        orphanInfo.isOrphaned
+      {
         worktreeDeletionError = WorktreeDeletionError(
           worktree: worktree,
           message: error.localizedDescription,
@@ -3318,11 +3562,14 @@ public final class CLISessionsViewModel {
   ///   - worktree: The orphaned worktree to delete
   ///   - parentRepoPath: Path to the parent git repository
   @discardableResult
-  public func deleteOrphanedWorktree(_ worktree: WorktreeBranch, parentRepoPath: String) async -> Bool {
+  public func deleteOrphanedWorktree(_ worktree: WorktreeBranch, parentRepoPath: String) async
+    -> Bool
+  {
     deletingWorktreePath = worktree.path
 
     do {
-      try await worktreeRemovalService.removeOrphanedWorktree(at: worktree.path, parentRepoPath: parentRepoPath)
+      try await worktreeRemovalService.removeOrphanedWorktree(
+        at: worktree.path, parentRepoPath: parentRepoPath)
       archiveMonitoredSessions(inWorktreePath: worktree.path)
       removeOwnedWorktreePath(worktree.path)
       deletingWorktreePath = nil
@@ -3483,7 +3730,9 @@ public final class CLISessionsViewModel {
 
   /// Toggles the expanded state of a repository
   public func toggleRepositoryExpanded(_ repository: SelectedRepository) {
-    guard let index = selectedRepositories.firstIndex(where: { $0.id == repository.id }) else { return }
+    guard let index = selectedRepositories.firstIndex(where: { $0.id == repository.id }) else {
+      return
+    }
     selectedRepositories[index].isExpanded.toggle()
     persistWorkspaceState()
   }
@@ -3491,7 +3740,10 @@ public final class CLISessionsViewModel {
   /// Toggles the expanded state of a worktree/branch
   public func toggleWorktreeExpanded(in repository: SelectedRepository, worktree: WorktreeBranch) {
     guard let repoIndex = selectedRepositories.firstIndex(where: { $0.id == repository.id }),
-          let worktreeIndex = selectedRepositories[repoIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) else {
+      let worktreeIndex = selectedRepositories[repoIndex].worktrees.firstIndex(where: {
+        $0.id == worktree.id
+      })
+    else {
       return
     }
     selectedRepositories[repoIndex].worktrees[worktreeIndex].isExpanded.toggle()
@@ -3508,7 +3760,10 @@ public final class CLISessionsViewModel {
       return NSError(
         domain: "CLISessionsViewModel",
         code: 2,
-        userInfo: [NSLocalizedDescriptionKey: "External terminal resume is only available for Claude sessions."]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "External terminal resume is only available for Claude sessions."
+        ]
       )
     }
     return TerminalLauncher.launchTerminalWithSession(
@@ -3524,12 +3779,17 @@ public final class CLISessionsViewModel {
   ///   - skipCheckout: If true, skips git checkout even for non-worktrees (already on correct branch)
   ///   - dangerouslySkipPermissions: If true, adds --dangerously-skip-permissions flag
   /// - Returns: An error if launching failed, nil on success
-  public func openTerminalInWorktree(_ worktree: WorktreeBranch, skipCheckout: Bool = false, dangerouslySkipPermissions: Bool = false) -> Error? {
+  public func openTerminalInWorktree(
+    _ worktree: WorktreeBranch, skipCheckout: Bool = false, dangerouslySkipPermissions: Bool = false
+  ) -> Error? {
     guard providerKind == .claude else {
       return NSError(
         domain: "CLISessionsViewModel",
         code: 2,
-        userInfo: [NSLocalizedDescriptionKey: "External terminal launch is only available for Claude sessions."]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "External terminal launch is only available for Claude sessions."
+        ]
       )
     }
     return TerminalLauncher.launchTerminalInPath(
@@ -3597,7 +3857,9 @@ public final class CLISessionsViewModel {
   ///   - worktree: The worktree to open
   ///   - skipCheckout: If true, skips git checkout even for non-worktrees
   /// - Returns: An error if launching failed, nil on success
-  public func openTerminalAndAutoObserve(_ worktree: WorktreeBranch, skipCheckout: Bool = false) async -> Error? {
+  public func openTerminalAndAutoObserve(_ worktree: WorktreeBranch, skipCheckout: Bool = false)
+    async -> Error?
+  {
     // Capture existing session IDs in this worktree
     existingSessionIdsBeforeTerminal = Set(worktree.sessions.map { $0.id })
     pendingAutoObserveWorktreePath = worktree.path
@@ -3633,7 +3895,8 @@ public final class CLISessionsViewModel {
 
       do {
         // 1. Capture source changes non-destructively before creating the worktree.
-        let changeSnapshot = try await worktreeService.captureWorkingTreeChanges(at: session.projectPath)
+        let changeSnapshot = try await worktreeService.captureWorkingTreeChanges(
+          at: session.projectPath)
 
         // 2. Create worktree at HEAD
         let worktreePath = try await worktreeService.createWorktreeWithNewBranch(
@@ -3656,7 +3919,8 @@ public final class CLISessionsViewModel {
         // Resolve which ViewModel launches the new session
         let resolvedProvider = targetProvider ?? providerKind
         if resolvedProvider != providerKind, let hub = agentHubProvider {
-          let targetViewModel = resolvedProvider == .claude
+          let targetViewModel =
+            resolvedProvider == .claude
             ? hub.claudeSessionsViewModel
             : hub.codexSessionsViewModel
           targetViewModel.addRepository(at: session.projectPath)
@@ -3705,6 +3969,11 @@ public final class CLISessionsViewModel {
 
     // Each pending session gets a unique ID, so no need to clear existing terminals
     // Terminals are now keyed by session ID, not worktree path
+    let existingSessionIdentifiers = sessionDetectionBaseline(
+      worktree: worktree,
+      launchPath: launchPath,
+      worktreeName: worktreeName
+    )
     let pending = PendingHubSession(
       worktree: worktree,
       launchPath: launchPath,
@@ -3713,6 +3982,7 @@ public final class CLISessionsViewModel {
       launchContext: nonEmpty(contextBlock?.trimmingCharacters(in: .whitespacesAndNewlines)),
       dangerouslySkipPermissions: dangerouslySkipPermissions,
       permissionModePlan: permissionModePlan,
+      existingSessionIdentifiers: existingSessionIdentifiers,
       worktreeName: worktreeName
     )
     pendingHubSessions.append(pending)
@@ -3721,12 +3991,12 @@ public final class CLISessionsViewModel {
       pendingTerminalPrompts["pending-\(pending.id.uuidString)"] = promptForTerminalSubmission
     }
 
-#if DEBUG
-    let encodedPath = pending.projectPath.claudeProjectPathEncoded
-    AppLogger.session.debug(
-      "[StartInHub] pendingId=\(pending.id.uuidString, privacy: .public) worktreePath=\(worktree.path, privacy: .public) projectPath=\(pending.projectPath, privacy: .public) encodedPath=\(encodedPath, privacy: .public)"
-    )
-#endif
+    #if DEBUG
+      let encodedPath = pending.projectPath.claudeProjectPathEncoded
+      AppLogger.session.debug(
+        "[StartInHub] pendingId=\(pending.id.uuidString, privacy: .public) worktreePath=\(worktree.path, privacy: .public) projectPath=\(pending.projectPath, privacy: .public) encodedPath=\(encodedPath, privacy: .public)"
+      )
+    #endif
 
     // Watch for the new session file
     Task { @MainActor in
@@ -3751,6 +4021,66 @@ public final class CLISessionsViewModel {
     Task {
       try? await metadataStore.saveSessionLaunchContext(record)
     }
+  }
+
+  private func sessionDetectionBaseline(
+    worktree: WorktreeBranch,
+    launchPath: String?,
+    worktreeName: String?
+  ) -> Set<String> {
+    switch providerKind {
+    case .claude:
+      let trimmedLaunchPath = launchPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+      let projectPath = nonEmpty(trimmedLaunchPath) ?? worktree.path
+      let effectivePath: String
+      if let worktreeName, !worktreeName.isEmpty {
+        effectivePath = projectPath + "/.claude/worktrees/" + worktreeName
+      } else {
+        effectivePath = projectPath
+      }
+      let claudeDataPath = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude"
+      let projectDirectory =
+        "\(claudeDataPath)/projects/\(effectivePath.claudeProjectPathEncoded)"
+      let files = (try? FileManager.default.contentsOfDirectory(atPath: projectDirectory)) ?? []
+      return Set(
+        files.compactMap { file in
+          guard file.hasSuffix(".jsonl") else { return nil }
+          return String(file.dropLast(6))
+        }
+      )
+    case .codex:
+      return Set(CodexSessionFileScanner.listSessionFiles(codexDataPath: codexDataPath))
+    }
+  }
+
+  /// Starts a local agent without requiring the Sessions screen to mount its terminal view.
+  /// Used by workflow automation for independent cross-provider review sessions.
+  @discardableResult
+  public func startAutomatedSessionInHub(
+    _ worktree: WorktreeBranch,
+    initialPrompt: String
+  ) -> UUID? {
+    startNewSessionInHub(worktree, initialPrompt: initialPrompt)
+    guard let pendingID = lastCreatedPendingId,
+      let pending = pendingHubSessions.first(where: { $0.id == pendingID })
+    else {
+      return nil
+    }
+
+    let pendingKey = "pending-\(pendingID.uuidString)"
+    _ = getOrCreateTerminal(
+      forKey: pendingKey,
+      sessionId: nil,
+      projectPath: pending.projectPath,
+      initialPrompt: providerKind == .claude ? initialPrompt : pending.initialPrompt
+    )
+
+    if providerKind == .claude {
+      pendingTerminalPrompts.removeValue(forKey: pendingKey)
+    }
+
+    lastCreatedPendingId = nil
+    return pendingID
   }
 
   /// Removes a pending Hub session (e.g., if user cancels)
@@ -3783,7 +4113,8 @@ public final class CLISessionsViewModel {
 
   /// Watches the Claude project directory for a new session file
   @MainActor
-  private func watchForNewClaudeSession(pending: PendingHubSession, worktree: WorktreeBranch) async {
+  private func watchForNewClaudeSession(pending: PendingHubSession, worktree: WorktreeBranch) async
+  {
     // Auto-named --worktree: we don't know the path ahead of time, poll history.jsonl instead
     if let worktreeName = pending.worktreeName, worktreeName.isEmpty {
       await pollForWorktreeHistoryEntry(pending: pending, repoPath: pending.projectPath)
@@ -3794,33 +4125,35 @@ public final class CLISessionsViewModel {
     let watchPath = claudeProjectPath(for: pending)
     let encodedPath = watchPath.claudeProjectPathEncoded
     let projectDir = "\(claudeDataPath)/projects/\(encodedPath)"
-#if DEBUG
-    AppLogger.watcher.debug(
-      "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) projectDir=\(projectDir, privacy: .public) exists=\(FileManager.default.fileExists(atPath: projectDir))"
-    )
-#endif
+    #if DEBUG
+      AppLogger.watcher.debug(
+        "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) projectDir=\(projectDir, privacy: .public) exists=\(FileManager.default.fileExists(atPath: projectDir))"
+      )
+    #endif
 
     // Get existing session files BEFORE watching
-    let existingFiles = Set((try? FileManager.default.contentsOfDirectory(atPath: projectDir)) ?? [])
-#if DEBUG
-    let existingJsonlCount = existingFiles.filter { $0.hasSuffix(".jsonl") }.count
-    AppLogger.watcher.debug(
-      "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) existingFiles=\(existingFiles.count) existingJsonl=\(existingJsonlCount)"
-    )
-#endif
+    let existingFiles = Set(
+      (try? FileManager.default.contentsOfDirectory(atPath: projectDir)) ?? [])
+    #if DEBUG
+      let existingJsonlCount = existingFiles.filter { $0.hasSuffix(".jsonl") }.count
+      AppLogger.watcher.debug(
+        "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) existingFiles=\(existingFiles.count) existingJsonl=\(existingJsonlCount)"
+      )
+    #endif
     if let existingSessionFile = findRecentClaudeSessionFile(
       in: existingFiles,
       projectDir: projectDir,
-      pendingStartedAt: pending.startedAt
+      pending: pending
     ) {
-#if DEBUG
-      AppLogger.watcher.debug(
-        "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) found existing session file \(existingSessionFile, privacy: .public)"
-      )
-#endif
-      let sessionId = String(existingSessionFile.dropLast(6)) // Remove ".jsonl"
-      handleNewSessionFound(sessionId: sessionId, pending: pending, worktree: worktree)
-      return
+      #if DEBUG
+        AppLogger.watcher.debug(
+          "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) found existing session file \(existingSessionFile, privacy: .public)"
+        )
+      #endif
+      let sessionId = String(existingSessionFile.dropLast(6))  // Remove ".jsonl"
+      if handleNewSessionFound(sessionId: sessionId, pending: pending, worktree: worktree) {
+        return
+      }
     }
 
     // Watch the directory for a new session file. The watcher owns the
@@ -3838,25 +4171,27 @@ public final class CLISessionsViewModel {
 
     switch outcome {
     case .found(let newFile):
-      let sessionId = String(newFile.dropLast(6)) // Remove ".jsonl"
-#if DEBUG
-      AppLogger.watcher.debug(
-        "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) found new session file \(newFile, privacy: .public)"
-      )
-#endif
-      handleNewSessionFound(sessionId: sessionId, pending: pending, worktree: worktree)
+      let sessionId = String(newFile.dropLast(6))  // Remove ".jsonl"
+      #if DEBUG
+        AppLogger.watcher.debug(
+          "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) found new session file \(newFile, privacy: .public)"
+        )
+      #endif
+      if !handleNewSessionFound(sessionId: sessionId, pending: pending, worktree: worktree) {
+        await watchForNewClaudeSession(pending: pending, worktree: worktree)
+      }
     case .cancelled:
-#if DEBUG
-      AppLogger.watcher.debug(
-        "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) watch cancelled"
-      )
-#endif
+      #if DEBUG
+        AppLogger.watcher.debug(
+          "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) watch cancelled"
+        )
+      #endif
     case .unableToWatch:
-#if DEBUG
-      AppLogger.watcher.debug(
-        "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) open failed, falling back to poll"
-      )
-#endif
+      #if DEBUG
+        AppLogger.watcher.debug(
+          "[WatchNewSession] pendingId=\(pending.id.uuidString, privacy: .public) open failed, falling back to poll"
+        )
+      #endif
       // Directory doesn't exist yet - poll until it does
       await pollForNewClaudeSessionFallback(pending: pending, worktree: worktree)
     }
@@ -3866,12 +4201,17 @@ public final class CLISessionsViewModel {
   private func findRecentClaudeSessionFile(
     in existingFiles: Set<String>,
     projectDir: String,
-    pendingStartedAt: Date
+    pending: PendingHubSession
   ) -> String? {
-    let candidates = existingFiles.filter { $0.hasSuffix(".jsonl") }
+    let candidates = existingFiles.filter { file in
+      guard file.hasSuffix(".jsonl") else { return false }
+      let sessionID = String(file.dropLast(6))
+      return !pending.existingSessionIdentifiers.contains(sessionID)
+        && pendingSessionClaims[sessionID] == nil
+    }
     guard !candidates.isEmpty else { return nil }
 
-    let cutoff = pendingStartedAt.addingTimeInterval(-2)  // small buffer for timing jitter
+    let cutoff = pending.startedAt.addingTimeInterval(-2)  // small buffer for timing jitter
     var newest: (file: String, createdAt: Date)?
 
     for file in candidates {
@@ -3893,20 +4233,28 @@ public final class CLISessionsViewModel {
   }
 
   /// Handles when a new session file is detected
+  @discardableResult
   private func handleNewSessionFound(
     sessionId: String,
     pending: PendingHubSession,
     worktree: WorktreeBranch,
     sessionFilePath: String? = nil
-  ) {
+  ) -> Bool {
+    let detectionIdentifier = providerKind == .codex ? sessionFilePath ?? sessionId : sessionId
+    guard !pending.existingSessionIdentifiers.contains(detectionIdentifier) else { return false }
+    if let claimOwner = pendingSessionClaims[sessionId], claimOwner != pending.id {
+      return false
+    }
+    pendingSessionClaims[sessionId] = pending.id
+
     // A competing resolution path (accessory detection, history polling) can
     // win while the kqueue watch is still armed; release its directory fd.
     pendingSessionWatchers.removeValue(forKey: pending.id)?.cancel()
-#if DEBUG
-    AppLogger.session.debug(
-      "[HandleNewSession] pendingId=\(pending.id.uuidString, privacy: .public) sessionId=\(sessionId, privacy: .public) worktreePath=\(worktree.path, privacy: .public) start"
-    )
-#endif
+    #if DEBUG
+      AppLogger.session.debug(
+        "[HandleNewSession] pendingId=\(pending.id.uuidString, privacy: .public) sessionId=\(sessionId, privacy: .public) worktreePath=\(worktree.path, privacy: .public) start"
+      )
+    #endif
     // Refresh to get the real session object with retry loop
     Task {
       if let worktreeName = pending.worktreeName, !worktreeName.isEmpty {
@@ -3936,12 +4284,16 @@ public final class CLISessionsViewModel {
         // Find and monitor the new session (try path matching first)
         var found = false
         for repo in selectedRepositories {
-          if let matchingWorktree = repo.worktrees.first(where: { $0.path == expectedWorktreePath || $0.path == worktree.path }),
-             let session = matchingWorktree.sessions.first(where: { $0.id == sessionId }) {
+          if let matchingWorktree = repo.worktrees.first(where: {
+            $0.path == expectedWorktreePath || $0.path == worktree.path
+          }),
+            let session = matchingWorktree.sessions.first(where: { $0.id == sessionId })
+          {
             // Remove pending only after finding the real session
             pendingHubSessions.removeAll { $0.id == pending.id }
             resolvedPendingSessions[pending.id] = session.id
             persistLaunchContext(pending: pending, sessionId: session.id)
+            resolvedPendingSessionHistory[pending.id] = session.id
             AppLogger.session.info("[HandleNewSession] Resolved: pending=\(pending.id.uuidString.prefix(8), privacy: .public) -> real=\(session.id.prefix(8), privacy: .public)")
             transferTerminal(fromPendingId: pending.id, toSessionId: session.id)
             transferAuxiliaryShellTerminal(fromPendingId: pending.id, toSessionId: session.id)
@@ -3960,6 +4312,7 @@ public final class CLISessionsViewModel {
               pendingHubSessions.removeAll { $0.id == pending.id }
               resolvedPendingSessions[pending.id] = session.id
               persistLaunchContext(pending: pending, sessionId: session.id)
+              resolvedPendingSessionHistory[pending.id] = session.id
               AppLogger.session.info("[HandleNewSession] Resolved: pending=\(pending.id.uuidString.prefix(8), privacy: .public) -> real=\(session.id.prefix(8), privacy: .public)")
               transferTerminal(fromPendingId: pending.id, toSessionId: session.id)
               transferAuxiliaryShellTerminal(fromPendingId: pending.id, toSessionId: session.id)
@@ -3977,7 +4330,8 @@ public final class CLISessionsViewModel {
         let encodedPath = effectivePath.claudeProjectPathEncoded
         let fallbackSessionFilePath = "\(claudeDataPath)/projects/\(encodedPath)/\(sessionId).jsonl"
         if providerKind == .claude,
-           FileManager.default.fileExists(atPath: fallbackSessionFilePath) {
+          FileManager.default.fileExists(atPath: fallbackSessionFilePath)
+        {
           // Session file exists but not in history.jsonl yet - create directly
           let newSession = CLISession(
             id: sessionId,
@@ -4004,26 +4358,29 @@ public final class CLISessionsViewModel {
           pendingHubSessions.removeAll { $0.id == pending.id }
           resolvedPendingSessions[pending.id] = sessionId
           persistLaunchContext(pending: pending, sessionId: sessionId)
+          resolvedPendingSessionHistory[pending.id] = sessionId
           AppLogger.session.info("[HandleNewSession] Resolved: pending=\(pending.id.uuidString.prefix(8), privacy: .public) -> real=\(sessionId.prefix(8), privacy: .public)")
           transferTerminal(fromPendingId: pending.id, toSessionId: sessionId)
           transferAuxiliaryShellTerminal(fromPendingId: pending.id, toSessionId: sessionId)
           startMonitoring(session: newSession)
-#if DEBUG
-          AppLogger.session.info(
-            "[HandleNewSession-Fallback] sessionId=\(sessionId, privacy: .public) created session directly from file (new worktree)"
-          )
-#endif
+          #if DEBUG
+            AppLogger.session.info(
+              "[HandleNewSession-Fallback] sessionId=\(sessionId, privacy: .public) created session directly from file (new worktree)"
+            )
+          #endif
           return
         }
 
-        let currentSessions = selectedRepositories
+        let currentSessions =
+          selectedRepositories
           .flatMap { $0.worktrees }
           .first { $0.path == worktree.path }?
           .sessions ?? []
 
         if providerKind == .codex,
-           currentSessions.isEmpty,
-           let sessionFilePath {
+          currentSessions.isEmpty,
+          let sessionFilePath
+        {
           let newSession = CLISession(
             id: sessionId,
             projectPath: pending.projectPath,
@@ -4039,7 +4396,9 @@ public final class CLISessionsViewModel {
           )
 
           for repoIndex in selectedRepositories.indices {
-            if let wtIndex = selectedRepositories[repoIndex].worktrees.firstIndex(where: { $0.path == worktree.path }) {
+            if let wtIndex = selectedRepositories[repoIndex].worktrees.firstIndex(where: {
+              $0.path == worktree.path
+            }) {
               selectedRepositories[repoIndex].worktrees[wtIndex].sessions.insert(newSession, at: 0)
               break
             }
@@ -4048,49 +4407,53 @@ public final class CLISessionsViewModel {
           pendingHubSessions.removeAll { $0.id == pending.id }
           resolvedPendingSessions[pending.id] = sessionId
           persistLaunchContext(pending: pending, sessionId: sessionId)
+          resolvedPendingSessionHistory[pending.id] = sessionId
           AppLogger.session.info("[HandleNewSession] Resolved: pending=\(pending.id.uuidString.prefix(8), privacy: .public) -> real=\(sessionId.prefix(8), privacy: .public)")
           transferTerminal(fromPendingId: pending.id, toSessionId: sessionId)
           transferAuxiliaryShellTerminal(fromPendingId: pending.id, toSessionId: sessionId)
           startMonitoring(session: newSession)
-#if DEBUG
-          AppLogger.session.info(
-            "[HandleNewSession-Fallback] sessionId=\(sessionId, privacy: .public) created Codex session directly from file"
-          )
-#endif
+          #if DEBUG
+            AppLogger.session.info(
+              "[HandleNewSession-Fallback] sessionId=\(sessionId, privacy: .public) created Codex session directly from file"
+            )
+          #endif
           return
         }
 
         // Log retry attempt (only if not the last attempt)
         if attempt < maxAttempts {
-#if DEBUG
-          AppLogger.session.debug(
-            "[HandleNewSession] sessionId=\(sessionId, privacy: .public) not found, retrying (\(attempt)/\(maxAttempts))"
-          )
-#endif
+          #if DEBUG
+            AppLogger.session.debug(
+              "[HandleNewSession] sessionId=\(sessionId, privacy: .public) not found, retrying (\(attempt)/\(maxAttempts))"
+            )
+          #endif
         }
       }
 
       // If still not found after all attempts, log warning
       // Keep pending session visible (terminal continues working)
-#if DEBUG
-      AppLogger.session.warning(
-        "[HandleNewSession] sessionId=\(sessionId, privacy: .public) not found after \(maxAttempts) attempts"
-      )
-#endif
+      #if DEBUG
+        AppLogger.session.warning(
+          "[HandleNewSession] sessionId=\(sessionId, privacy: .public) not found after \(maxAttempts) attempts"
+        )
+      #endif
     }
+    return true
   }
 
   /// Fallback: polls for the project directory to be created, then watches it
   @MainActor
-  private func pollForNewClaudeSessionFallback(pending: PendingHubSession, worktree: WorktreeBranch) async {
+  private func pollForNewClaudeSessionFallback(pending: PendingHubSession, worktree: WorktreeBranch)
+    async
+  {
     let claudeDataPath = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude"
     let encodedPath = claudeProjectPath(for: pending).claudeProjectPathEncoded
     let projectDir = "\(claudeDataPath)/projects/\(encodedPath)"
-#if DEBUG
-    AppLogger.watcher.debug(
-      "[PollNewSession] pendingId=\(pending.id.uuidString, privacy: .public) projectDir=\(projectDir, privacy: .public) start"
-    )
-#endif
+    #if DEBUG
+      AppLogger.watcher.debug(
+        "[PollNewSession] pendingId=\(pending.id.uuidString, privacy: .public) projectDir=\(projectDir, privacy: .public) start"
+      )
+    #endif
 
     // Wait indefinitely for directory to be created, then watch it
     // User can close the pending session card to cancel
@@ -4099,20 +4462,20 @@ public final class CLISessionsViewModel {
 
       // Check if pending session was cancelled by user
       if !pendingHubSessions.contains(where: { $0.id == pending.id }) {
-#if DEBUG
-        AppLogger.watcher.debug(
-          "[PollNewSession] pendingId=\(pending.id.uuidString, privacy: .public) cancelled by user"
-        )
-#endif
+        #if DEBUG
+          AppLogger.watcher.debug(
+            "[PollNewSession] pendingId=\(pending.id.uuidString, privacy: .public) cancelled by user"
+          )
+        #endif
         return
       }
 
       if FileManager.default.fileExists(atPath: projectDir) {
-#if DEBUG
-        AppLogger.watcher.debug(
-          "[PollNewSession] pendingId=\(pending.id.uuidString, privacy: .public) projectDir exists, restarting watch"
-        )
-#endif
+        #if DEBUG
+          AppLogger.watcher.debug(
+            "[PollNewSession] pendingId=\(pending.id.uuidString, privacy: .public) projectDir exists, restarting watch"
+          )
+        #endif
         // Directory exists now - restart watching
         await watchForNewClaudeSession(pending: pending, worktree: worktree)
         return
@@ -4129,27 +4492,30 @@ public final class CLISessionsViewModel {
     let historyPath = "\(claudeDataPath)/history.jsonl"
     let worktreePrefix = repoPath + "/.claude/worktrees/"
 
-#if DEBUG
-    AppLogger.watcher.debug(
-      "[PollWorktreeHistory] pendingId=\(pending.id.uuidString, privacy: .public) prefix=\(worktreePrefix, privacy: .public)"
-    )
-#endif
+    #if DEBUG
+      AppLogger.watcher.debug(
+        "[PollWorktreeHistory] pendingId=\(pending.id.uuidString, privacy: .public) prefix=\(worktreePrefix, privacy: .public)"
+      )
+    #endif
 
     while true {
       try? await Task.sleep(for: .seconds(1))
 
       if !pendingHubSessions.contains(where: { $0.id == pending.id }) { return }
 
-      guard let contents = try? String(contentsOfFile: historyPath, encoding: .utf8) else { continue }
+      guard let contents = try? String(contentsOfFile: historyPath, encoding: .utf8) else {
+        continue
+      }
 
       // Parse history.jsonl lines for entries with matching project path after pending.startedAt
       let lines = contents.components(separatedBy: "\n").filter { !$0.isEmpty }
       for line in lines.reversed() {
         guard let data = line.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let sessionId = json["sessionId"] as? String,
-              let projectPath = json["project"] as? String,
-              projectPath.hasPrefix(worktreePrefix) else { continue }
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let sessionId = json["sessionId"] as? String,
+          let projectPath = json["project"] as? String,
+          projectPath.hasPrefix(worktreePrefix)
+        else { continue }
 
         // Only consider entries created after this pending session started
         var entryDate: Date?
@@ -4158,19 +4524,24 @@ public final class CLISessionsViewModel {
         }
         if let date = entryDate, date < pending.startedAt { continue }
 
-#if DEBUG
-        AppLogger.watcher.debug(
-          "[PollWorktreeHistory] pendingId=\(pending.id.uuidString, privacy: .public) found sessionId=\(sessionId, privacy: .public) at \(projectPath, privacy: .public)"
-        )
-#endif
+        #if DEBUG
+          AppLogger.watcher.debug(
+            "[PollWorktreeHistory] pendingId=\(pending.id.uuidString, privacy: .public) found sessionId=\(sessionId, privacy: .public) at \(projectPath, privacy: .public)"
+          )
+        #endif
         let worktreeName = URL(fileURLWithPath: projectPath).lastPathComponent
         let resolvedWorktree = await registerCreatedWorktree(
           name: worktreeName,
           path: projectPath,
           parentRepositoryPath: repoPath
         )
-        handleNewSessionFound(sessionId: sessionId, pending: pending, worktree: resolvedWorktree)
-        return
+        if handleNewSessionFound(
+          sessionId: sessionId,
+          pending: pending,
+          worktree: resolvedWorktree
+        ) {
+          return
+        }
       }
     }
   }
@@ -4181,20 +4552,22 @@ public final class CLISessionsViewModel {
   @MainActor
   private func watchForNewCodexSession(pending: PendingHubSession, worktree: WorktreeBranch) async {
     var knownFiles = Set(CodexSessionFileScanner.listSessionFiles(codexDataPath: codexDataPath))
+    let launchFiles = knownFiles.subtracting(pending.existingSessionIdentifiers)
 
     if let meta = findRecentCodexSession(
-      in: knownFiles,
+      in: launchFiles,
       pending: pending,
       worktree: worktree,
       pendingStartedAt: pending.startedAt
     ) {
-      handleNewSessionFound(
+      if handleNewSessionFound(
         sessionId: meta.sessionId,
         pending: pending,
         worktree: worktree,
         sessionFilePath: meta.sessionFilePath
-      )
-      return
+      ) {
+        return
+      }
     }
 
     await pollForNewCodexSession(
@@ -4224,18 +4597,20 @@ public final class CLISessionsViewModel {
       let newFiles = currentFiles.subtracting(knownFiles)
 
       if let meta = findRecentCodexSession(
-        in: newFiles.isEmpty ? currentFiles : newFiles,
+        in: newFiles.isEmpty
+          ? currentFiles.subtracting(pending.existingSessionIdentifiers) : newFiles,
         pending: pending,
         worktree: worktree,
         pendingStartedAt: pending.startedAt
       ) {
-        handleNewSessionFound(
+        if handleNewSessionFound(
           sessionId: meta.sessionId,
           pending: pending,
           worktree: worktree,
           sessionFilePath: meta.sessionFilePath
-        )
-        return
+        ) {
+          return
+        }
       }
 
       knownFiles = currentFiles
@@ -4254,8 +4629,10 @@ public final class CLISessionsViewModel {
     var newest: (meta: CodexSessionMeta, modifiedAt: Date)?
 
     for path in filePaths {
+      guard !pending.existingSessionIdentifiers.contains(path) else { continue }
       guard let modifiedAt = fileModificationDate(path), modifiedAt >= cutoff else { continue }
       guard let meta = CodexSessionFileScanner.readSessionMeta(from: path) else { continue }
+      guard pendingSessionClaims[meta.sessionId] == nil else { continue }
       guard codexSessionMatchesPending(meta, pending: pending, worktree: worktree) else { continue }
 
       if let current = newest {
@@ -4283,7 +4660,8 @@ public final class CLISessionsViewModel {
 
   private func fileModificationDate(_ path: String) -> Date? {
     guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-          let modDate = attrs[.modificationDate] as? Date else {
+      let modDate = attrs[.modificationDate] as? Date
+    else {
       return nil
     }
     return modDate
@@ -4293,8 +4671,8 @@ public final class CLISessionsViewModel {
   /// - Parameter session: The session whose ID to copy
   public func copySessionId(_ session: CLISession) {
     #if canImport(AppKit)
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(session.id, forType: .string)
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(session.id, forType: .string)
     #endif
   }
 
@@ -4351,7 +4729,9 @@ public final class CLISessionsViewModel {
     monitoredSessionIds.insert(session.id)
     monitoredSessionBackup[session.id] = session
     if session.isWorktree {
-      let worktreePath = WorktreeModuleResolver.bestMatch(for: session.projectPath, repositories: selectedRepositories)?.worktree.path
+      let worktreePath =
+        WorktreeModuleResolver.bestMatch(
+          for: session.projectPath, repositories: selectedRepositories)?.worktree.path
         ?? session.projectPath
       registerOwnedWorktreePath(worktreePath)
     }
@@ -4367,7 +4747,10 @@ public final class CLISessionsViewModel {
     guard providerKind == .codex else { return }
     guard monitoredSessionIds.contains(sessionId) else { return }
     guard monitoringCancellables[sessionId] == nil else { return }
-    guard let session = allSessions.first(where: { $0.id == sessionId }) ?? monitoredSessionBackup[sessionId] else {
+    guard
+      let session = allSessions.first(where: { $0.id == sessionId })
+        ?? monitoredSessionBackup[sessionId]
+    else {
       return
     }
 
@@ -4408,7 +4791,8 @@ public final class CLISessionsViewModel {
           do {
             try await store.setPinned(false, for: sessionId)
           } catch {
-            AppLogger.session.error("Failed to unpin archived session: \(error.localizedDescription)")
+            AppLogger.session.error(
+              "Failed to unpin archived session: \(error.localizedDescription)")
           }
         }
       }
@@ -4515,6 +4899,11 @@ public final class CLISessionsViewModel {
     if sessionStatuses[sessionId] != state.status {
       sessionStatuses[sessionId] = state.status
     }
+    if let message = state.lastAssistantMessage,
+      sessionLastAssistantMessages[sessionId] != message
+    {
+      sessionLastAssistantMessages[sessionId] = message
+    }
     let references = GitHubPullRequestURLReferenceCache.references(
       in: state.detectedResourceLinks.map(\.url)
     )
@@ -4528,6 +4917,7 @@ public final class CLISessionsViewModel {
   private func removeMonitorState(for sessionId: String) {
     monitorStates.removeValue(forKey: sessionId)
     sessionStatuses.removeValue(forKey: sessionId)
+    sessionLastAssistantMessages.removeValue(forKey: sessionId)
     sessionPullRequestReferences.removeValue(forKey: sessionId)
     monitorStateModels[sessionId]?.update(nil)
     monitorStateModels.removeValue(forKey: sessionId)
@@ -4613,15 +5003,18 @@ public final class CLISessionsViewModel {
   private func processPendingAutoObserve() {
     // Handle search result auto-observe (existing logic)
     if let sessionId = pendingAutoObserveSessionId,
-       let projectPath = pendingAutoObserveProjectPath {
+      let projectPath = pendingAutoObserveProjectPath
+    {
       // Clear pending state
       pendingAutoObserveSessionId = nil
       pendingAutoObserveProjectPath = nil
 
       // Find the repository containing this project path
-      guard let repoIndex = selectedRepositories.firstIndex(where: {
-        $0.path == projectPath || $0.worktrees.contains { $0.path == projectPath }
-      }) else {
+      guard
+        let repoIndex = selectedRepositories.firstIndex(where: {
+          $0.path == projectPath || $0.worktrees.contains { $0.path == projectPath }
+        })
+      else {
         return
       }
 
@@ -4660,7 +5053,9 @@ public final class CLISessionsViewModel {
             // Expand repo and worktree, start monitoring
             if let repoIndex = selectedRepositories.firstIndex(where: { $0.id == repo.id }) {
               selectedRepositories[repoIndex].isExpanded = true
-              if let wtIndex = selectedRepositories[repoIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
+              if let wtIndex = selectedRepositories[repoIndex].worktrees.firstIndex(where: {
+                $0.id == worktree.id
+              }) {
                 selectedRepositories[repoIndex].worktrees[wtIndex].isExpanded = true
               }
             }
@@ -4681,25 +5076,25 @@ public final class CLISessionsViewModel {
   /// avoiding HIRunLoopSemaphore deadlock that occurs during GCD dispatch queue drain.
   public func showSearchFilterPicker() {
     #if canImport(AppKit)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-      MainActor.assumeIsolated {
-        let panel = NSOpenPanel()
-        panel.title = "Filter by Repository"
-        panel.message = "Select a repository to filter search results"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        MainActor.assumeIsolated {
+          let panel = NSOpenPanel()
+          panel.title = "Filter by Repository"
+          panel.message = "Select a repository to filter search results"
+          panel.canChooseFiles = false
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.canCreateDirectories = false
 
-        if panel.runModal() == .OK, let url = panel.url {
-          self.searchFilterPath = url.path
-          // Re-run search with new filter if there's an active query
-          if !self.searchQuery.isEmpty {
-            self.performSearch()
+          if panel.runModal() == .OK, let url = panel.url {
+            self.searchFilterPath = url.path
+            // Re-run search with new filter if there's an active query
+            if !self.searchQuery.isEmpty {
+              self.performSearch()
+            }
           }
         }
       }
-    }
     #endif
   }
 

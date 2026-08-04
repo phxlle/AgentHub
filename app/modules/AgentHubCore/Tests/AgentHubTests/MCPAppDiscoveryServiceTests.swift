@@ -48,6 +48,75 @@ struct MCPAppDiscoveryServiceTests {
     #expect(result["content"]?.arrayValue?.first?["text"] == .string("called"))
   }
 
+  @Test("Stdio client reports EOF without crashing")
+  func stdioClientReportsEOFWithoutCrashing() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let script = directory.appending(path: "stdio-eof.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r line
+    exit 0
+    """.write(to: script, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+    let client = MCPStdioJSONRPCClient(
+      config: MCPServerConfiguration(
+        provider: .codex,
+        projectPath: directory.path,
+        name: "eof",
+        command: "/bin/sh",
+        args: [script.path],
+        cwd: directory.path
+      ),
+      requestTimeoutSeconds: 2
+    )
+    try client.start()
+    defer { client.close() }
+
+    await #expect(throws: MCPAppDiscoveryError.self) {
+      _ = try await client.request(method: "initialize", params: .object([:]))
+    }
+  }
+
+  @Test("Stdio client can close while waiting for a response")
+  func stdioClientClosesWhileWaitingForResponse() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let script = directory.appending(path: "stdio-wait.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r line
+    exec /bin/sleep 10
+    """.write(to: script, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+    let client = MCPStdioJSONRPCClient(
+      config: MCPServerConfiguration(
+        provider: .claude,
+        projectPath: directory.path,
+        name: "waiting",
+        command: "/bin/sh",
+        args: [script.path],
+        cwd: directory.path
+      ),
+      requestTimeoutSeconds: 2
+    )
+    try client.start()
+
+    let request = Task {
+      try await client.request(method: "initialize", params: .object([:]))
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    client.close()
+
+    await #expect(throws: MCPAppDiscoveryError.self) {
+      _ = try await request.value
+    }
+  }
+
   @Test("Reuses initialized clients across tool calls")
   func reusesInitializedClientsAcrossToolCalls() async throws {
     let endpoint = try #require(URL(string: "http://localhost:9100/mcp"))

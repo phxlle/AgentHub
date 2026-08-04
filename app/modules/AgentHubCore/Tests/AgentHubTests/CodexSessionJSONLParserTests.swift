@@ -20,33 +20,33 @@ struct CodexSessionJSONLParserTests {
         "payload": [
           "id": "session-1",
           "timestamp": "2026-01-01T00:00:00.000Z",
-          "cwd": "/tmp/project"
-        ]
+          "cwd": "/tmp/project",
+        ],
       ]),
       jsonLine([
         "type": "event_msg",
         "timestamp": "2026-01-01T00:00:01.000Z",
         "payload": [
           "type": "user_message",
-          "message": "  \(longMessage)  "
-        ]
+          "message": "  \(longMessage)  ",
+        ],
       ]),
       jsonLine([
         "type": "event_msg",
         "timestamp": "2026-01-01T00:00:02.000Z",
         "payload": [
           "type": "agent_message",
-          "message": "assistant"
-        ]
+          "message": "assistant",
+        ],
       ]),
       jsonLine([
         "type": "event_msg",
         "timestamp": "2026-01-01T00:00:03.000Z",
         "payload": [
           "type": "user_message",
-          "message": "last message"
-        ]
-      ])
+          "message": "last message",
+        ],
+      ]),
     ].joined(separator: "\n")
       .write(to: sessionFile, atomically: true, encoding: .utf8)
 
@@ -57,6 +57,25 @@ struct CodexSessionJSONLParserTests {
     #expect(result.firstUserMessage == String(repeating: "a", count: 500))
     #expect(result.lastUserMessage == "last message")
     #expect(result.lastActivityAt == expectedLastActivity)
+  }
+
+  @Test("Captures the final assistant message for workflow handoff")
+  func capturesFinalAssistantMessage() {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = jsonLine([
+      "type": "event_msg",
+      "timestamp": timestamp,
+      "payload": [
+        "type": "agent_message",
+        "message": "Implementation complete.",
+      ],
+    ])
+
+    var result = CodexSessionJSONLParser.ParseResult()
+    CodexSessionJSONLParser.parseNewLines([line], into: &result)
+
+    #expect(result.currentStatus == .waitingForUser)
+    #expect(result.lastAssistantMessage == "Implementation complete.")
   }
 
   @Test("Caps detected resource links to the newest fifty URLs")
@@ -88,16 +107,17 @@ struct CodexSessionJSONLParserTests {
         "call_id": "call-1",
         "output": """
         {"url":"https://github.com/jamesrochabrun/AgentHub/pull/322","avatar_url":"https://avatars.githubusercontent.com/u/5378604"}
-        """
-      ]
+        """,
+      ],
     ])
 
     var result = CodexSessionJSONLParser.ParseResult()
     CodexSessionJSONLParser.parseNewLines([line], into: &result)
 
-    #expect(result.detectedResourceLinks.map(\.url) == [
-      "https://github.com/jamesrochabrun/AgentHub/pull/322"
-    ])
+    #expect(
+      result.detectedResourceLinks.map(\.url) == [
+        "https://github.com/jamesrochabrun/AgentHub/pull/322"
+      ])
   }
 
   @Test("Extracts pull request URL from MCP tool result")
@@ -114,20 +134,21 @@ struct CodexSessionJSONLParserTests {
                 "type": "text",
                 "text": """
                 {"url":"https://github.com/jamesrochabrun/AgentHub/pull/322","avatar_url":"https://avatars.githubusercontent.com/u/5378604"}
-                """
+                """,
               ]
             ]
           ]
-        ]
-      ]
+        ],
+      ],
     ])
 
     var result = CodexSessionJSONLParser.ParseResult()
     CodexSessionJSONLParser.parseNewLines([line], into: &result)
 
-    #expect(result.detectedResourceLinks.map(\.url) == [
-      "https://github.com/jamesrochabrun/AgentHub/pull/322"
-    ])
+    #expect(
+      result.detectedResourceLinks.map(\.url) == [
+        "https://github.com/jamesrochabrun/AgentHub/pull/322"
+      ])
   }
 
   @Test("Detects MCP app resources from MCP tool result")
@@ -146,13 +167,13 @@ struct CodexSessionJSONLParserTests {
                 "resource": [
                   "uri": "ui://charts/dashboard",
                   "mimeType": "text/html;profile=mcp-app",
-                  "text": "<main>Chart</main>"
-                ]
+                  "text": "<main>Chart</main>",
+                ],
               ]
             ]
           ]
-        ]
-      ]
+        ],
+      ],
     ])
 
     var result = CodexSessionJSONLParser.ParseResult()

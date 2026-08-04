@@ -12,11 +12,12 @@ struct SessionWorkspaceStatePersistenceTests {
     let store = try SessionMetadataStore(path: temporaryWorkspaceStateDatabasePath())
     let state = SessionWorkspaceState(
       selectedRepositoryPaths: ["/tmp/project-a", "/tmp/project-b"],
+      selectedFolderPaths: ["/tmp"],
       monitoredSessionIds: ["session-1", "session-2"],
       ownedWorktreePaths: ["/tmp/project-a/worktrees/feature"],
       expansionState: [
         "repo:/tmp/project-a": true,
-        "wt:/tmp/project-a/worktrees/feature": false
+        "wt:/tmp/project-a/worktrees/feature": false,
       ]
     )
 
@@ -49,28 +50,29 @@ struct SessionWorkspaceStatePersistenceTests {
       }
       try db.execute(
         sql: """
-        INSERT INTO session_workspace_state
-        (provider, selectedRepositoryPathsData, monitoredSessionIdsData, expansionStateData, updatedAt)
-        VALUES (?, ?, ?, ?, ?)
-        """,
+          INSERT INTO session_workspace_state
+          (provider, selectedRepositoryPathsData, monitoredSessionIdsData, expansionStateData, updatedAt)
+          VALUES (?, ?, ?, ?, ?)
+          """,
         arguments: [
           SessionProviderKind.claude.rawValue,
           selectedRepositoryPathsData,
           monitoredSessionIdsData,
           expansionStateData,
-          Date(timeIntervalSince1970: 1_000)
+          Date(timeIntervalSince1970: 1_000),
         ]
       )
     }
 
     let store = try SessionMetadataStore(path: path)
     #expect(
-      store.getWorkspaceStateSync(for: .claude) == SessionWorkspaceState(
-        selectedRepositoryPaths: ["/tmp/project"],
-        monitoredSessionIds: ["session-1"],
-        ownedWorktreePaths: [],
-        expansionState: ["repo:/tmp/project": true]
-      )
+      store.getWorkspaceStateSync(for: .claude)
+        == SessionWorkspaceState(
+          selectedRepositoryPaths: ["/tmp/project"],
+          monitoredSessionIds: ["session-1"],
+          ownedWorktreePaths: [],
+          expansionState: ["repo:/tmp/project": true]
+        )
     )
   }
 

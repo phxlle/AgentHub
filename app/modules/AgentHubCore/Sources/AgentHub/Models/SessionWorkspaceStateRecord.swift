@@ -12,6 +12,7 @@ public struct SessionWorkspaceStateRecord: Codable, Sendable, FetchableRecord, P
 
   public var provider: String
   public var selectedRepositoryPathsData: Data
+  public var selectedFolderPathsData: Data?
   public var monitoredSessionIdsData: Data
   public var ownedWorktreePathsData: Data?
   public var expansionStateData: Data
@@ -24,6 +25,7 @@ public struct SessionWorkspaceStateRecord: Codable, Sendable, FetchableRecord, P
   ) throws {
     self.provider = provider
     self.selectedRepositoryPathsData = try JSONEncoder().encode(state.selectedRepositoryPaths)
+    self.selectedFolderPathsData = try JSONEncoder().encode(state.selectedFolderPaths)
     self.monitoredSessionIdsData = try JSONEncoder().encode(state.monitoredSessionIds)
     self.ownedWorktreePathsData = try JSONEncoder().encode(state.ownedWorktreePaths)
     self.expansionStateData = try JSONEncoder().encode(state.expansionState)
@@ -32,12 +34,18 @@ public struct SessionWorkspaceStateRecord: Codable, Sendable, FetchableRecord, P
 
   public func decodedState() -> SessionWorkspaceState {
     SessionWorkspaceState(
-      selectedRepositoryPaths: (try? JSONDecoder().decode([String].self, from: selectedRepositoryPathsData)) ?? [],
-      monitoredSessionIds: (try? JSONDecoder().decode([String].self, from: monitoredSessionIdsData)) ?? [],
+      selectedRepositoryPaths: (try? JSONDecoder().decode(
+        [String].self, from: selectedRepositoryPathsData)) ?? [],
+      selectedFolderPaths: selectedFolderPathsData.flatMap {
+        try? JSONDecoder().decode([String].self, from: $0)
+      } ?? [],
+      monitoredSessionIds: (try? JSONDecoder().decode([String].self, from: monitoredSessionIdsData))
+        ?? [],
       ownedWorktreePaths: ownedWorktreePathsData.flatMap {
         try? JSONDecoder().decode([String].self, from: $0)
       } ?? [],
-      expansionState: (try? JSONDecoder().decode([String: Bool].self, from: expansionStateData)) ?? [:]
+      expansionState: (try? JSONDecoder().decode([String: Bool].self, from: expansionStateData))
+        ?? [:]
     )
   }
 }

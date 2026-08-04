@@ -503,6 +503,16 @@ public actor GitHubCLIService {
     )
   }
 
+  /// Executes an authenticated GitHub CLI command for another service in this module.
+  /// Project APIs do not require a local repository, so the user's home folder is
+  /// used as a stable working directory.
+  func runAuthenticatedCommand(
+    _ arguments: [String],
+    timeout: TimeInterval = commandTimeout
+  ) async throws -> String {
+    try await runGH(arguments, at: NSHomeDirectory(), timeout: timeout)
+  }
+
   /// Runs a command with arguments and returns stdout
   private func runCommand(
     _ executable: String,

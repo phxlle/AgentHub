@@ -85,10 +85,12 @@ struct LazyBrowseSessionsLoadingTests {
     )
     let monitor = LazyBrowseMockMonitorService(
       skeletonRepositories: [repository(path: "/tmp/project")],
-      browseRepositories: [repository(path: "/tmp/project", sessions: [firstSession, secondSession])],
+      browseRepositories: [
+        repository(path: "/tmp/project", sessions: [firstSession, secondSession])
+      ],
       sessionsById: [
         "session-1": firstSession,
-        "session-2": secondSession
+        "session-2": secondSession,
       ]
     )
     let watcher = RecordingFileWatcher()
@@ -160,12 +162,15 @@ struct LazyBrowseSessionsLoadingTests {
       await hookInstaller.syncRequests().count == 1
     }
 
-    #expect(await hookInstaller.syncRequests() == [
-      Set(["/tmp/project", "/tmp/project-feature"])
-    ])
+    #expect(
+      await hookInstaller.syncRequests() == [
+        Set(["/tmp/project", "/tmp/project-feature"])
+      ])
   }
 
-  @Test("Idle repository changes still trigger Claude hook sync", .disabled("headless-quarantine: async propagation timing; see TestQuarantine.md"))
+  @Test(
+    "Idle repository changes still trigger Claude hook sync",
+    .disabled("headless-quarantine: async propagation timing; see TestQuarantine.md"))
   func idleRepositoryChangesTriggerClaudeHookSync() async throws {
     let store = try SessionMetadataStore(path: temporaryDatabasePath())
     let repository = repositoryWithWorktree(
@@ -205,7 +210,8 @@ struct LazyBrowseSessionsLoadingTests {
       await hookInstaller.syncRequests().count == baselineCount + 1
     }
     #expect(viewModel.selectedRepositories.map(\.path) == ["/tmp/project"])
-    #expect(await hookInstaller.syncRequests().last == Set(["/tmp/project", "/tmp/project-feature"]))
+    #expect(
+      await hookInstaller.syncRequests().last == Set(["/tmp/project", "/tmp/project-feature"]))
   }
 
   @Test("Launch targeted restore skips sessions outside restored roots")
@@ -238,7 +244,7 @@ struct LazyBrowseSessionsLoadingTests {
       browseRepositories: [repository(path: "/tmp/project", sessions: [session])],
       sessionsById: [
         "orphan-session": orphan,
-        "session-1": session
+        "session-1": session,
       ]
     )
     let watcher = RecordingFileWatcher()
@@ -451,7 +457,8 @@ struct LazyBrowseSessionsLoadingTests {
 
     let projectPath = "/tmp/project"
     let sessionId = "11111111-1111-1111-1111-111111111111"
-    let projectDir = root
+    let projectDir =
+      root
       .appending(path: "projects")
       .appending(path: projectPath.claudeProjectPathEncoded)
     let subagentDir = projectDir.appending(path: "subagents")
@@ -490,7 +497,8 @@ struct LazyBrowseSessionsLoadingTests {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let sessionsDir = root
+    let sessionsDir =
+      root
       .appending(path: "sessions")
       .appending(path: "2026")
       .appending(path: "05")
@@ -505,11 +513,11 @@ struct LazyBrowseSessionsLoadingTests {
       message: "requested",
       baseInstructionsLength: 24_000
     )
-      .write(
-        to: sessionsDir.appending(path: "rollout-2026-05-05T12-00-00-\(requestedId).jsonl"),
-        atomically: true,
-        encoding: .utf8
-      )
+    .write(
+      to: sessionsDir.appending(path: "rollout-2026-05-05T12-00-00-\(requestedId).jsonl"),
+      atomically: true,
+      encoding: .utf8
+    )
     try codexLines(sessionId: otherId, cwd: "/tmp/other", message: "other")
       .write(
         to: sessionsDir.appending(path: "rollout-2026-05-05T12-01-00-\(otherId).jsonl"),
@@ -563,7 +571,8 @@ struct LazyBrowseSessionsLoadingTests {
 
     let pending = try #require(viewModel.pendingHubSessions.first)
     let sessionId = "44444444-4444-4444-4444-444444444444"
-    let sessionsDir = root
+    let sessionsDir =
+      root
       .appending(path: "sessions")
       .appending(path: "2026")
       .appending(path: "05")
@@ -594,6 +603,80 @@ struct LazyBrowseSessionsLoadingTests {
     await waitUntilAsync {
       (await watcher.startedSessionIds()).contains(sessionId)
     }
+  }
+
+  @Test("Concurrent launches on one branch keep distinct session terminals")
+  func concurrentLaunchesKeepDistinctSessionTerminals() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let projectURL = root.appending(path: "project", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+
+    let viewModel = CLISessionsViewModel(
+      monitorService: CodexSessionMonitorService(codexDataPath: root.path),
+      fileWatcher: RecordingFileWatcher(),
+      searchService: nil,
+      cliConfiguration: CLICommandConfiguration(command: "codex", mode: .codex),
+      providerKind: .codex,
+      approvalNotificationService: NoOpApprovalNotificationService(),
+      codexDataPath: root.path
+    )
+    viewModel.addRepository(at: projectURL.path)
+
+    await waitUntil(timeout: .seconds(6)) {
+      viewModel.loadingState == .idle && viewModel.selectedRepositories.count == 1
+    }
+    let worktree = try #require(
+      viewModel.selectedRepositories.first?.worktrees.first(where: { $0.path == projectURL.path })
+    )
+
+    viewModel.startNewSessionInHub(worktree, initialPrompt: "first workflow")
+    let firstPendingID = try #require(viewModel.lastCreatedPendingId)
+    viewModel.startNewSessionInHub(worktree, initialPrompt: "second workflow")
+    let secondPendingID = try #require(viewModel.lastCreatedPendingId)
+    let firstTerminal = TerminalContainerView()
+    let secondTerminal = TerminalContainerView()
+    viewModel.activeTerminals["pending-\(firstPendingID.uuidString)"] = firstTerminal
+    viewModel.activeTerminals["pending-\(secondPendingID.uuidString)"] = secondTerminal
+
+    let sessionsDir =
+      root
+      .appending(path: "sessions")
+      .appending(path: "2026")
+      .appending(path: "08")
+      .appending(path: "03")
+    try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+    let firstSessionID = "55555555-5555-5555-5555-555555555555"
+    let secondSessionID = "66666666-6666-6666-6666-666666666666"
+
+    try codexLines(sessionId: firstSessionID, cwd: projectURL.path, message: "first workflow")
+      .write(
+        to: sessionsDir.appending(path: "rollout-2026-08-03T12-00-00-\(firstSessionID).jsonl"),
+        atomically: true,
+        encoding: .utf8
+      )
+    await waitUntil(timeout: .seconds(8)) {
+      viewModel.resolvedPendingSessionHistory.count == 1
+    }
+
+    try codexLines(sessionId: secondSessionID, cwd: projectURL.path, message: "second workflow")
+      .write(
+        to: sessionsDir.appending(path: "rollout-2026-08-03T12-00-01-\(secondSessionID).jsonl"),
+        atomically: true,
+        encoding: .utf8
+      )
+    await waitUntil(timeout: .seconds(8)) {
+      viewModel.resolvedPendingSessionHistory[firstPendingID] != nil
+        && viewModel.resolvedPendingSessionHistory[secondPendingID] != nil
+    }
+
+    let firstResolvedID = try #require(viewModel.resolvedPendingSessionHistory[firstPendingID])
+    let secondResolvedID = try #require(viewModel.resolvedPendingSessionHistory[secondPendingID])
+    #expect(firstResolvedID != secondResolvedID)
+    #expect(Set([firstResolvedID, secondResolvedID]) == Set([firstSessionID, secondSessionID]))
+    #expect(viewModel.activeTerminals[firstResolvedID]?.view === firstTerminal)
+    #expect(viewModel.activeTerminals[secondResolvedID]?.view === secondTerminal)
   }
 }
 
@@ -632,7 +715,8 @@ private actor LazyBrowseMockMonitorService: SessionMonitorServiceProtocol {
       return nil
     }
 
-    let repositoryToAdd = browseRepositories.first { $0.path == path }
+    let repositoryToAdd =
+      browseRepositories.first { $0.path == path }
       ?? skeletonRepositories.first { $0.path == path }
       ?? repository(path: path)
     repositories.append(repositoryToAdd)
@@ -694,7 +778,9 @@ private struct LazyBrowseMockCalls: Sendable {
 }
 
 private actor RecordingFileWatcher: SessionFileWatcherProtocol {
-  nonisolated(unsafe) private let subject = PassthroughSubject<SessionFileWatcher.StateUpdate, Never>()
+  nonisolated(unsafe) private let subject = PassthroughSubject<
+    SessionFileWatcher.StateUpdate, Never
+  >()
   private var started: [String] = []
   private var stopped: [String] = []
 
@@ -826,7 +912,7 @@ private func codexLines(
     "cwd": cwd,
     "git": [
       "branch": "main"
-    ]
+    ],
   ]
 
   if baseInstructionsLength > 0 {
@@ -838,22 +924,22 @@ private func codexLines(
   let sessionMeta: [String: Any] = [
     "timestamp": "2026-05-05T12:00:00.000Z",
     "type": "session_meta",
-    "payload": sessionMetaPayload
+    "payload": sessionMetaPayload,
   ]
   let userMessage: [String: Any] = [
     "timestamp": "2026-05-05T12:00:01.000Z",
     "type": "event_msg",
     "payload": [
       "type": "user_message",
-      "message": message
-    ]
+      "message": message,
+    ],
   ]
 
   return """
-  \(jsonLine(sessionMeta))
-  \(jsonLine(userMessage))
+    \(jsonLine(sessionMeta))
+    \(jsonLine(userMessage))
 
-  """
+    """
 }
 
 private func jsonLine(_ object: [String: Any]) -> String {

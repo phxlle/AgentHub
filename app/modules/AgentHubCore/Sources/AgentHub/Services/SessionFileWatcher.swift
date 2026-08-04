@@ -35,7 +35,8 @@ public actor SessionFileWatcher {
   private let claudePath: String
 
   /// Serial queue for processing file events and status updates to prevent data races
-  private nonisolated let processingQueue = DispatchQueue(label: "com.agenthub.sessionwatcher.processing")
+  private nonisolated let processingQueue = DispatchQueue(
+    label: "com.agenthub.sessionwatcher.processing")
 
   /// Seconds to wait before considering a tool as awaiting approval
   private var approvalTimeoutSeconds: Int = 0
@@ -52,7 +53,8 @@ public actor SessionFileWatcher {
 
   public init(
     claudePath: String = "~/.claude",
-    approvalNotificationService: any ApprovalNotificationServiceProtocol = ApprovalNotificationService.shared,
+    approvalNotificationService: any ApprovalNotificationServiceProtocol =
+      ApprovalNotificationService.shared,
     hookSidecarWatcher: (any ClaudeHookSidecarWatcherProtocol)? = nil
   ) {
     self.claudePath = NSString(string: claudePath).expandingTildeInPath
@@ -73,12 +75,17 @@ public actor SessionFileWatcher {
   // MARK: - Public API
 
   /// Start monitoring a session
-  public func startMonitoring(sessionId: String, projectPath: String, sessionFilePath: String? = nil) async {
-    AppLogger.watcher.info("[Polling] START monitoring session: \(sessionId.prefix(8), privacy: .public)")
+  public func startMonitoring(
+    sessionId: String, projectPath: String, sessionFilePath: String? = nil
+  ) async {
+    AppLogger.watcher.info(
+      "[Polling] START monitoring session: \(sessionId.prefix(8), privacy: .public)")
 
     // If already monitoring, just re-emit current state
     if let existingInfo = watchedSessions[sessionId] {
-      AppLogger.watcher.info("[Polling] Session already monitored, re-emitting state: \(sessionId.prefix(8), privacy: .public)")
+      AppLogger.watcher.info(
+        "[Polling] Session already monitored, re-emitting state: \(sessionId.prefix(8), privacy: .public)"
+      )
       let hookPendingInfo = await hookSidecarWatcher?.pendingInfo(for: sessionId)
       let hookPermissionMode = await hookSidecarWatcher?.permissionMode(for: sessionId)
       let state = buildMonitorState(
@@ -96,21 +103,24 @@ public actor SessionFileWatcher {
     // store would overwrite — and thereby orphan — the first watcher's
     // dispatch source, leaking its descriptors and status timer.
     guard !startingSessions.contains(sessionId) else {
-      AppLogger.watcher.info("[Polling] Start already in flight for: \(sessionId.prefix(8), privacy: .public)")
+      AppLogger.watcher.info(
+        "[Polling] Start already in flight for: \(sessionId.prefix(8), privacy: .public)")
       return
     }
     startingSessions.insert(sessionId)
     defer { startingSessions.remove(sessionId) }
 
     // Find session file
-    let resolvedFilePath = sessionFilePath ?? findSessionFile(sessionId: sessionId, projectPath: projectPath)
+    let resolvedFilePath =
+      sessionFilePath ?? findSessionFile(sessionId: sessionId, projectPath: projectPath)
     guard let filePath = resolvedFilePath else {
       AppLogger.watcher.error("[Polling] Could not find session file for: \(sessionId)")
       return
     }
 
     // Initial parse
-    var parseResult = SessionJSONLParser.parseSessionFile(at: filePath, approvalTimeoutSeconds: approvalTimeoutSeconds)
+    var parseResult = SessionJSONLParser.parseSessionFile(
+      at: filePath, approvalTimeoutSeconds: approvalTimeoutSeconds)
 
     // Seed hook-sourced pending info (if the hook fired before we started).
     var hookPendingInfo: SessionJSONLParser.PendingToolInfo?
@@ -160,17 +170,21 @@ public actor SessionFileWatcher {
     let statusTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
 
     func rescheduleStatusTimer() {
-      guard let nextInterval = SessionWatcherTimerPolicy.nextInterval(
-        lastActivity: parseResult.recentActivities.last,
-        currentStatus: parseResult.currentStatus,
-        lastFileEventTime: lastFileEventTime,
-        approvalTimeoutSeconds: timeout
-      ) else {
-        statusTimer.schedule(deadline: .distantFuture, leeway: SessionWatcherTimerPolicy.timerLeeway)
+      guard
+        let nextInterval = SessionWatcherTimerPolicy.nextInterval(
+          lastActivity: parseResult.recentActivities.last,
+          currentStatus: parseResult.currentStatus,
+          lastFileEventTime: lastFileEventTime,
+          approvalTimeoutSeconds: timeout
+        )
+      else {
+        statusTimer.schedule(
+          deadline: .distantFuture, leeway: SessionWatcherTimerPolicy.timerLeeway)
         return
       }
 
-      statusTimer.schedule(deadline: .now() + nextInterval, leeway: SessionWatcherTimerPolicy.timerLeeway)
+      statusTimer.schedule(
+        deadline: .now() + nextInterval, leeway: SessionWatcherTimerPolicy.timerLeeway)
     }
 
     source.setEventHandler { [weak self] in
@@ -192,7 +206,8 @@ public actor SessionFileWatcher {
         }
 
         // Parse new lines
-        SessionJSONLParser.parseNewLines(newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
+        SessionJSONLParser.parseNewLines(
+          newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
 
         let updatedState = self.buildMonitorState(
           from: parseResult,
@@ -250,7 +265,8 @@ public actor SessionFileWatcher {
           let newLines = self.readNewLines(from: filePath, startingAt: &tempPosition)
 
           if !newLines.isEmpty {
-            SessionJSONLParser.parseNewLines(newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
+            SessionJSONLParser.parseNewLines(
+              newLines, into: &parseResult, approvalTimeoutSeconds: timeout)
 
             // Update tracking
             lastKnownFileSize = tempPosition
@@ -279,10 +295,14 @@ public actor SessionFileWatcher {
         if updatedState.status != lastEmittedStatus {
           // Detect transition TO awaitingApproval (for notification)
           if case .awaitingApproval(let tool) = updatedState.status,
-             !self.isAwaitingApproval(previousStatus) {
+            !self.isAwaitingApproval(previousStatus)
+          {
             // Get last user message for notification context
             let lastMessage = parseResult.recentActivities
-              .last(where: { if case .userMessage = $0.type { return true }; return false })?
+              .last(where: {
+                if case .userMessage = $0.type { return true }
+                return false
+              })?
               .description
 
             // Send notification
@@ -346,11 +366,15 @@ public actor SessionFileWatcher {
             // Fire the approval notification when the hook signals a new
             // pending tool (and only when we haven't already notified for it).
             if let info = update.info,
-               case .awaitingApproval = updatedState.status,
-               notifiedRef.lastNotifiedToolUseId != info.toolUseId {
+              case .awaitingApproval = updatedState.status,
+              notifiedRef.lastNotifiedToolUseId != info.toolUseId
+            {
               notifiedRef.lastNotifiedToolUseId = info.toolUseId
               let lastMessage = parseResult.recentActivities
-                .last(where: { if case .userMessage = $0.type { return true }; return false })?
+                .last(where: {
+                  if case .userMessage = $0.type { return true }
+                  return false
+                })?
                 .description
               approvalNotificationService.sendApprovalNotification(
                 sessionId: sessionId,
@@ -385,10 +409,12 @@ public actor SessionFileWatcher {
 
   /// Stop monitoring a session
   public func stopMonitoring(sessionId: String) async {
-    AppLogger.watcher.info("[Polling] STOP monitoring session: \(sessionId.prefix(8), privacy: .public)")
+    AppLogger.watcher.info(
+      "[Polling] STOP monitoring session: \(sessionId.prefix(8), privacy: .public)")
 
     guard let info = watchedSessions.removeValue(forKey: sessionId) else {
-      AppLogger.watcher.info("[Polling] Session was not being monitored: \(sessionId.prefix(8), privacy: .public)")
+      AppLogger.watcher.info(
+        "[Polling] Session was not being monitored: \(sessionId.prefix(8), privacy: .public)")
       return
     }
 
@@ -398,7 +424,8 @@ public actor SessionFileWatcher {
     if let hookSidecarWatcher {
       await hookSidecarWatcher.stopWatching(sessionId: sessionId)
     }
-    AppLogger.watcher.info("[Polling] Cancelled file watcher and timer for: \(sessionId.prefix(8), privacy: .public)")
+    AppLogger.watcher.info(
+      "[Polling] Cancelled file watcher and timer for: \(sessionId.prefix(8), privacy: .public)")
   }
 
   /// Get current state for a session
@@ -427,11 +454,13 @@ public actor SessionFileWatcher {
     let newLines = readNewLines(from: info.filePath, startingAt: &filePosition)
 
     if !newLines.isEmpty {
-      SessionJSONLParser.parseNewLines(newLines, into: &parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
+      SessionJSONLParser.parseNewLines(
+        newLines, into: &parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
       info.lastKnownFileSize = filePosition
       info.lastFileEventTime = Date()
     } else {
-      SessionJSONLParser.updateCurrentStatus(&parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
+      SessionJSONLParser.updateCurrentStatus(
+        &parseResult, approvalTimeoutSeconds: approvalTimeoutSeconds)
     }
 
     info.parseResult = parseResult
@@ -475,7 +504,7 @@ public actor SessionFileWatcher {
     // Try alternative encodings
     let alternativeEncodings = [
       projectPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "",
-      projectPath.claudeProjectPathEncoded.replacingOccurrences(of: "~", with: "-")
+      projectPath.claudeProjectPathEncoded.replacingOccurrences(of: "~", with: "-"),
     ]
 
     for encoded in alternativeEncodings {
@@ -508,7 +537,9 @@ public actor SessionFileWatcher {
     return UInt64(st.st_size)
   }
 
-  private nonisolated func readNewLines(from path: String, startingAt position: inout UInt64) -> [String] {
+  private nonisolated func readNewLines(from path: String, startingAt position: inout UInt64)
+    -> [String]
+  {
     guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
     defer { try? handle.close() }
 
@@ -578,7 +609,8 @@ public actor SessionFileWatcher {
         return .awaitingApproval(tool: p.toolName)
       }
       if case .awaitingApproval(let tool) = result.currentStatus,
-         shouldSuppressApproval(forTool: tool, permissionMode: permissionMode) {
+        shouldSuppressApproval(forTool: tool, permissionMode: permissionMode)
+      {
         return .executingTool(name: tool)
       }
       return result.currentStatus
@@ -588,9 +620,9 @@ public actor SessionFileWatcher {
       status: derivedStatus,
       currentTool: extractCurrentTool(from: result),
       lastActivityAt: result.lastActivityAt ?? Date(),
-      inputTokens: result.lastInputTokens,          // Last input (context window)
-      outputTokens: result.lastOutputTokens,         // Last output
-      totalOutputTokens: result.totalOutputTokens,   // Accumulated (for cost)
+      inputTokens: result.lastInputTokens,  // Last input (context window)
+      outputTokens: result.lastOutputTokens,  // Last output
+      totalOutputTokens: result.totalOutputTokens,  // Accumulated (for cost)
       cacheReadTokens: result.cacheReadTokens,
       cacheCreationTokens: result.cacheCreationTokens,
       messageCount: result.messageCount,
@@ -599,6 +631,7 @@ public actor SessionFileWatcher {
       gitBranch: result.gitBranch,
       pendingToolUse: pendingToolUse,
       recentActivities: result.recentActivities,
+      lastAssistantMessage: result.lastAssistantMessage,
       hasMermaidContent: result.hasMermaidContent,
       detectedResourceLinks: result.detectedResourceLinks,
       detectedMCPAppResources: result.detectedMCPAppResources,
@@ -608,7 +641,9 @@ public actor SessionFileWatcher {
     )
   }
 
-  private nonisolated func extractCurrentTool(from result: SessionJSONLParser.ParseResult) -> String? {
+  private nonisolated func extractCurrentTool(from result: SessionJSONLParser.ParseResult)
+    -> String?
+  {
     if let (_, pending) = result.pendingToolUses.first {
       return pending.toolName
     }

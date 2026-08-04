@@ -89,6 +89,10 @@ public enum AgentHubDefaults {
   /// Type: String (default: "Claude")
   public static let selectedSidePanelProvider = "\(keyPrefix)sidepanel.selectedProvider"
 
+  /// Persisted manual workflow definitions, session moves, and dismissed workflow sessions
+  /// Type: Data (JSON-encoded ManualWorkflowDashboardState)
+  public static let manualWorkflowDashboardState = "\(keyPrefix)workflows.manualState"
+
   // MARK: - Stats Settings
 
   /// Selected provider in stats view segmented control
@@ -227,7 +231,8 @@ public enum AgentHubDefaults {
   /// Whether the debug web preview Design/Code/Console panel is enabled.
   /// Inline source edit mode is always available.
   /// Type: Bool (default: false)
-  public static let webPreviewDesignPanelEnabled = "\(keyPrefix)developer.webPreviewDesignPanelEnabled"
+  public static let webPreviewDesignPanelEnabled =
+    "\(keyPrefix)developer.webPreviewDesignPanelEnabled"
 
   /// Whether Edit Mode writes proven changes straight to source (style rules
   /// with a proven CSS mapping, text on a static preview) instead of queueing
@@ -243,13 +248,15 @@ public enum AgentHubDefaults {
   /// Whether the simulator side panel automatically Build & Runs when Swift
   /// sources change and no injection-armed launch can hot-swap them.
   /// Type: Bool (default: true)
-  public static let simulatorAutoRunOnAgentChanges = "\(keyPrefix)features.simulatorAutoRunOnAgentChanges"
+  public static let simulatorAutoRunOnAgentChanges =
+    "\(keyPrefix)features.simulatorAutoRunOnAgentChanges"
 
   /// Whether the real Simulator.app window is kept hidden (⌘H-style, still
   /// running) while the side panel mirrors the device. Panel-mirrored runs
   /// also skip bringing Simulator.app to the foreground.
   /// Type: Bool (default: true)
-  public static let simulatorHideSimulatorAppWhileMirroring = "\(keyPrefix)features.simulatorHideSimulatorAppWhileMirroring"
+  public static let simulatorHideSimulatorAppWhileMirroring =
+    "\(keyPrefix)features.simulatorHideSimulatorAppWhileMirroring"
 
   /// Whether agent sessions launched in Xcode projects get the XcodeBuildMCP
   /// server (simulator build/run, UI automation, screenshots) configured.
@@ -260,7 +267,8 @@ public enum AgentHubDefaults {
 
   /// Inspector payload level used by debug web preview inspect flows
   /// Type: String (default: "regular")
-  public static let webPreviewInspectorDataLevel = "\(keyPrefix)developer.webPreviewInspectorDataLevel"
+  public static let webPreviewInspectorDataLevel =
+    "\(keyPrefix)developer.webPreviewInspectorDataLevel"
 
   /// Width of the side panel (diff, plan, web preview, GitHub) in the single-session layout
   /// Type: Double (default: 700)
@@ -358,7 +366,7 @@ public enum AgentHubDefaults {
     "selectedTheme": selectedTheme,
     "customPrimaryHex": customPrimaryHex,
     "customSecondaryHex": customSecondaryHex,
-    "customTertiaryHex": customTertiaryHex
+    "customTertiaryHex": customTertiaryHex,
   ]
 
   /// Migrates legacy UserDefaults keys to namespaced keys

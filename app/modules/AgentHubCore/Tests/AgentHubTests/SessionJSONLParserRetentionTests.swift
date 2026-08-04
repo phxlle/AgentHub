@@ -6,6 +6,20 @@ import Testing
 @Suite("SessionJSONLParser retention")
 struct SessionJSONLParserRetentionTests {
 
+  @Test("Captures the complete final assistant message for workflow handoff")
+  func capturesFinalAssistantMessage() {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = """
+      {"type":"assistant","timestamp":"\(timestamp)","message":{"role":"assistant","content":[{"type":"text","text":"Implementation complete."},{"type":"text","text":"All tests pass."}]}}
+      """
+
+    var result = SessionJSONLParser.ParseResult()
+    SessionJSONLParser.parseNewLines([line], into: &result)
+
+    #expect(result.currentStatus == .waitingForUser)
+    #expect(result.lastAssistantMessage == "Implementation complete.\nAll tests pass.")
+  }
+
   @Test("Compacts older code change activities but keeps the newest five detailed")
   func compactsOlderCodeChangeActivities() {
     let lines = (1...7).map { index in
