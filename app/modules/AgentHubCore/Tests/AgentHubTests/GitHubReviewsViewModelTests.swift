@@ -65,6 +65,121 @@ struct GitHubReviewsViewModelTests {
     #expect(prompt.contains("file and line references"))
   }
 
+  @Test("Links the latest review session for each provider by exact pull request context")
+  func linksExistingReviewSessions() {
+    let pullRequest = makePullRequest(id: "ready", isDraft: false)
+    let olderCodex = makeSession(
+      id: "codex-old",
+      date: Date(timeIntervalSince1970: 100),
+      message: "Review this pull request independently: \(pullRequest.url)"
+    )
+    let newerCodex = makeSession(
+      id: "codex-new",
+      date: Date(timeIntervalSince1970: 200),
+      message: "Perform a read-only review for \(pullRequest.url)"
+    )
+    let implementationSession = makeSession(
+      id: "implementation",
+      date: Date(timeIntervalSince1970: 300),
+      message: "Implementation finished at \(pullRequest.url)"
+    )
+    let claude = makeSession(
+      id: "claude-review",
+      date: Date(timeIntervalSince1970: 150),
+      message: "Review this pull request independently: \(pullRequest.url)"
+    )
+
+    let links = GitHubReviewSessionLinker.links(
+      for: pullRequest,
+      launches: [],
+      inventories: [
+        GitHubReviewSessionInventory(
+          provider: .codex,
+          sessions: [olderCodex, newerCodex, implementationSession],
+          pendingSessions: [],
+          resolvedPendingSessionIDs: [:],
+          customNames: ["codex-new": "PR 450 review"],
+          statuses: ["codex-new": .waitingForUser]
+        ),
+        GitHubReviewSessionInventory(
+          provider: .claude,
+          sessions: [claude],
+          pendingSessions: [],
+          resolvedPendingSessionIDs: [:],
+          customNames: [:],
+          statuses: [:]
+        ),
+      ]
+    )
+
+    #expect(links.map(\.session.id) == ["codex-new", "claude-review"])
+    #expect(links.first?.displayName == "PR 450 review")
+    #expect(links.first?.statusText == "Ready")
+    #expect(!links.contains { $0.session.id == "implementation" })
+  }
+
+  @Test("Keeps an explicit review launch linked while its pending session resolves")
+  func linksPendingAndResolvedReviewLaunch() {
+    let pullRequest = makePullRequest(id: "ready", isDraft: false)
+    let pending = PendingHubSession(
+      worktree: WorktreeBranch(name: "main", path: "/tmp/xfa-native-mobile")
+    )
+    let launch = GitHubReviewSessionLaunch(
+      pullRequestID: pullRequest.id,
+      provider: .claude,
+      pendingID: pending.id,
+      projectPath: pending.projectPath,
+      launchedAt: pending.startedAt
+    )
+    let pendingInventory = GitHubReviewSessionInventory(
+      provider: .claude,
+      sessions: [],
+      pendingSessions: [pending],
+      resolvedPendingSessionIDs: [:],
+      customNames: [:],
+      statuses: [:]
+    )
+
+    let pendingLinks = GitHubReviewSessionLinker.links(
+      for: pullRequest,
+      launches: [launch],
+      inventories: [pendingInventory]
+    )
+
+    #expect(pendingLinks.count == 1)
+    #expect(pendingLinks[0].isPending)
+    #expect(pendingLinks[0].statusText == "Starting")
+    #expect(
+      pendingLinks[0].itemID
+        == "pending-claude-\(pending.id.uuidString)"
+    )
+
+    let resolvedSession = makeSession(
+      id: "resolved-review",
+      date: Date(timeIntervalSince1970: 400),
+      message: nil
+    )
+    let resolvedInventory = GitHubReviewSessionInventory(
+      provider: .claude,
+      sessions: [resolvedSession],
+      pendingSessions: [],
+      resolvedPendingSessionIDs: [pending.id: resolvedSession.id],
+      customNames: [:],
+      statuses: [resolvedSession.id: .thinking]
+    )
+
+    let resolvedLinks = GitHubReviewSessionLinker.links(
+      for: pullRequest,
+      launches: [launch],
+      inventories: [resolvedInventory]
+    )
+
+    #expect(resolvedLinks.count == 1)
+    #expect(!resolvedLinks[0].isPending)
+    #expect(resolvedLinks[0].session.id == resolvedSession.id)
+    #expect(resolvedLinks[0].statusText == "Working")
+  }
+
   private func makeProject() -> GitHubReviewProject {
     GitHubReviewProject(
       id: "project-3",
@@ -105,6 +220,16 @@ struct GitHubReviewsViewModelTests {
       isDraft: isDraft,
       state: "open",
       projectStatus: "Code Review 🔎"
+    )
+  }
+
+  private func makeSession(id: String, date: Date, message: String?) -> CLISession {
+    CLISession(
+      id: id,
+      projectPath: "/tmp/xfa-native-mobile",
+      branchName: "main",
+      lastActivityAt: date,
+      firstMessage: message
     )
   }
 

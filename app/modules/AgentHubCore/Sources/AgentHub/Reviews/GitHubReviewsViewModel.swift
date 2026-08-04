@@ -19,6 +19,7 @@ public final class GitHubReviewsViewModel {
   private let defaults: UserDefaults
   private var didLoad = false
   private var refreshGeneration = 0
+  private var reviewSessionLaunchesByPullRequestID: [String: [GitHubReviewSessionLaunch]] = [:]
 
   public private(set) var projects: [GitHubReviewProject] = []
   public private(set) var selectedProjectID: String?
@@ -114,6 +115,32 @@ public final class GitHubReviewsViewModel {
 
   public func presentLaunchError(_ message: String) {
     errorMessage = message
+  }
+
+  public func registerReviewLaunch(
+    for pullRequest: GitHubProjectPullRequest,
+    provider: SessionProviderKind,
+    pendingID: UUID,
+    projectPath: String,
+    launchedAt: Date = Date()
+  ) {
+    var launches = reviewSessionLaunchesByPullRequestID[pullRequest.id] ?? []
+    launches.removeAll { $0.provider == provider }
+    launches.append(
+      GitHubReviewSessionLaunch(
+        pullRequestID: pullRequest.id,
+        provider: provider,
+        pendingID: pendingID,
+        projectPath: projectPath,
+        launchedAt: launchedAt
+      ))
+    reviewSessionLaunchesByPullRequestID[pullRequest.id] = launches
+  }
+
+  func reviewSessionLaunches(
+    for pullRequest: GitHubProjectPullRequest
+  ) -> [GitHubReviewSessionLaunch] {
+    reviewSessionLaunchesByPullRequestID[pullRequest.id] ?? []
   }
 
   private func loadProjects() async {

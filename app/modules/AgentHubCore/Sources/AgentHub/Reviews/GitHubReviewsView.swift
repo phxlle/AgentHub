@@ -8,14 +8,23 @@ import SwiftUI
 
 struct GitHubReviewsView: View {
   @Bindable private var viewModel: GitHubReviewsViewModel
+  @Bindable private var claudeSessionsViewModel: CLISessionsViewModel
+  @Bindable private var codexSessionsViewModel: CLISessionsViewModel
   private let onReview: (GitHubProjectPullRequest, SessionProviderKind) -> Void
+  private let onOpenSession: (GitHubReviewSessionLink) -> Void
 
   init(
     viewModel: GitHubReviewsViewModel,
-    onReview: @escaping (GitHubProjectPullRequest, SessionProviderKind) -> Void
+    claudeSessionsViewModel: CLISessionsViewModel,
+    codexSessionsViewModel: CLISessionsViewModel,
+    onReview: @escaping (GitHubProjectPullRequest, SessionProviderKind) -> Void,
+    onOpenSession: @escaping (GitHubReviewSessionLink) -> Void
   ) {
     self.viewModel = viewModel
+    self.claudeSessionsViewModel = claudeSessionsViewModel
+    self.codexSessionsViewModel = codexSessionsViewModel
     self.onReview = onReview
+    self.onOpenSession = onOpenSession
   }
 
   var body: some View {
@@ -161,7 +170,9 @@ struct GitHubReviewsView: View {
   }
 
   private var pullRequestTable: some View {
-    Table(viewModel.pullRequests) {
+    let inventories = reviewSessionInventories
+
+    return Table(viewModel.pullRequests) {
       TableColumn("Pull request") { pullRequest in
         VStack(alignment: .leading, spacing: 2) {
           Link(pullRequest.title, destination: URL(string: pullRequest.url)!)
@@ -202,6 +213,16 @@ struct GitHubReviewsView: View {
       }
       .width(min: 80, ideal: 110)
 
+      TableColumn("Session") { pullRequest in
+        let links = GitHubReviewSessionLinker.links(
+          for: pullRequest,
+          launches: viewModel.reviewSessionLaunches(for: pullRequest),
+          inventories: inventories
+        )
+        reviewSessionsCell(links)
+      }
+      .width(min: 190, ideal: 240)
+
       TableColumn("Review") { pullRequest in
         HStack(spacing: DesignTokens.Spacing.xs) {
           Button("Codex") {
@@ -221,6 +242,75 @@ struct GitHubReviewsView: View {
       }
       .width(min: 145, ideal: 160)
     }
+  }
+
+  @ViewBuilder
+  private func reviewSessionsCell(_ links: [GitHubReviewSessionLink]) -> some View {
+    if links.isEmpty {
+      Text("No linked session")
+        .font(.secondaryCaption)
+        .foregroundStyle(.tertiary)
+    } else {
+      VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+        ForEach(links) { link in
+          Button {
+            onOpenSession(link)
+          } label: {
+            HStack(spacing: DesignTokens.Spacing.xs) {
+              Image(systemName: link.isPending ? "hourglass" : "terminal")
+                .foregroundStyle(link.isPending ? .secondary : .primary)
+
+              VStack(alignment: .leading, spacing: 1) {
+                Text("\(link.provider.rawValue) · \(link.displayName)")
+                  .font(.secondaryDefault)
+                  .lineLimit(1)
+                HStack(spacing: 3) {
+                  Text(link.statusText)
+                  Text("·")
+                  Text(link.session.lastActivityAt, style: .relative)
+                }
+                .font(.secondaryCaption)
+                .foregroundStyle(.secondary)
+              }
+
+              Spacer(minLength: 2)
+
+              Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .help("Open \(link.provider.rawValue) session \(link.displayName)")
+          .accessibilityLabel(
+            "Open \(link.provider.rawValue) session \(link.displayName), \(link.statusText)"
+          )
+        }
+      }
+      .padding(.vertical, DesignTokens.Spacing.xs)
+    }
+  }
+
+  private var reviewSessionInventories: [GitHubReviewSessionInventory] {
+    [
+      GitHubReviewSessionInventory(
+        provider: .claude,
+        sessions: claudeSessionsViewModel.allSessions,
+        pendingSessions: claudeSessionsViewModel.pendingHubSessions,
+        resolvedPendingSessionIDs: claudeSessionsViewModel.resolvedPendingSessionHistory,
+        customNames: claudeSessionsViewModel.sessionCustomNames,
+        statuses: claudeSessionsViewModel.sessionStatuses
+      ),
+      GitHubReviewSessionInventory(
+        provider: .codex,
+        sessions: codexSessionsViewModel.allSessions,
+        pendingSessions: codexSessionsViewModel.pendingHubSessions,
+        resolvedPendingSessionIDs: codexSessionsViewModel.resolvedPendingSessionHistory,
+        customNames: codexSessionsViewModel.sessionCustomNames,
+        statuses: codexSessionsViewModel.sessionStatuses
+      ),
+    ]
   }
 
   private var projectBinding: Binding<String?> {

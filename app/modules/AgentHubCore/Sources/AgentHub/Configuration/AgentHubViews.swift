@@ -106,12 +106,17 @@ public struct AgentHubOperationsView: View {
           if let agentHub {
             GitHubReviewsView(
               viewModel: agentHub.gitHubReviewsViewModel,
+              claudeSessionsViewModel: agentHub.claudeSessionsViewModel,
+              codexSessionsViewModel: agentHub.codexSessionsViewModel,
               onReview: { pullRequest, provider in
                 startReview(
                   pullRequest,
                   provider: provider,
                   agentHub: agentHub
                 )
+              },
+              onOpenSession: { link in
+                openReviewSession(link, agentHub: agentHub)
               }
             )
           } else {
@@ -220,12 +225,43 @@ public struct AgentHubOperationsView: View {
     )
 
     sessionsViewModel.addRepository(at: normalizedPath)
-    guard sessionsViewModel.startAutomatedSessionInHub(target, initialPrompt: prompt) != nil else {
+    guard
+      let pendingID = sessionsViewModel.startAutomatedSessionInHub(
+        target,
+        initialPrompt: prompt
+      )
+    else {
       agentHub.gitHubReviewsViewModel.presentLaunchError(
         "Could not start the \(provider.rawValue) review session."
       )
       return
     }
+    agentHub.gitHubReviewsViewModel.registerReviewLaunch(
+      for: pullRequest,
+      provider: provider,
+      pendingID: pendingID,
+      projectPath: normalizedPath
+    )
+    section = .sessions
+  }
+
+  private func openReviewSession(
+    _ link: GitHubReviewSessionLink,
+    agentHub: AgentHubProvider
+  ) {
+    let sessionsViewModel =
+      link.provider == .claude
+      ? agentHub.claudeSessionsViewModel
+      : agentHub.codexSessionsViewModel
+    if !link.isPending, !sessionsViewModel.isMonitoring(sessionId: link.session.id) {
+      sessionsViewModel.startMonitoring(session: link.session)
+    }
+    agentHub.globalSessionSelectionRouter.select(
+      providerKind: link.provider,
+      sessionId: link.session.id,
+      projectPath: link.session.projectPath,
+      itemId: link.itemID
+    )
     section = .sessions
   }
 
