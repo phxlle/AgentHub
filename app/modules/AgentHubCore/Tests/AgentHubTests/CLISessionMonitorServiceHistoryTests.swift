@@ -91,7 +91,7 @@ struct CLISessionMonitorServiceHistoryTests {
 
     let service = CLISessionMonitorService(claudeDataPath: root.path)
     await service.registerWorktree(
-      WorktreeBranch(name: "feature/import", path: worktreePath, isWorktree: true),
+      WorktreeBranch(name: "feature/current", path: worktreePath, isWorktree: true),
       parentRepositoryPath: parentPath
     )
 
@@ -114,9 +114,38 @@ struct CLISessionMonitorServiceHistoryTests {
     )
 
     #expect(page.sessions.map(\.id) == ["session-4", "session-3", "session-2"])
+    #expect(page.sessions.allSatisfy { $0.branchName == "feature/current" })
     let allFromWorktree = page.sessions.allSatisfy(\.isWorktree)
     #expect(allFromWorktree)
     #expect(page.hasMore)
+  }
+
+  @Test("Refresh uses current Claude worktree branch instead of session metadata")
+  func refreshUsesCurrentClaudeWorktreeBranch() async throws {
+    let root = try temporaryDirectory(name: "claude_current_branch")
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let parentPath = root.appending(path: "Project").path
+    let worktreePath = root.appending(path: "Project-feature").path
+    try FileManager.default.createDirectory(atPath: worktreePath, withIntermediateDirectories: true)
+
+    let service = CLISessionMonitorService(claudeDataPath: root.path)
+    await service.registerWorktree(
+      WorktreeBranch(name: "feature/current", path: worktreePath, isWorktree: true),
+      parentRepositoryPath: parentPath
+    )
+    try writeClaudeHistory(
+      root: root,
+      entries: [("session-current", worktreePath, 1_000, "Review current branch")]
+    )
+    await service.setFocusedSessionIds(["session-current"])
+
+    await service.refreshSessions(skipWorktreeRedetection: true)
+
+    let session = try #require(
+      await service.getSelectedRepositories().flatMap(\.worktrees).flatMap(\.sessions).first
+    )
+    #expect(session.branchName == "feature/current")
   }
 }
 

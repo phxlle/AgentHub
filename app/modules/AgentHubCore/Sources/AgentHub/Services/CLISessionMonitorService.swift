@@ -341,7 +341,7 @@ public actor CLISessionMonitorService {
       return CLISession(
         id: sessionId,
         projectPath: summary.project,
-        branchName: sessionMetadata?.branch ?? worktree.branchName,
+        branchName: worktree.branchName ?? sessionMetadata?.branch,
         isWorktree: worktree.isWorktree,
         lastActivityAt: [summary.lastActivityDate, fileModifiedAt].compactMap { $0 }.max() ?? summary.lastActivityDate,
         messageCount: summary.messageCount,
@@ -458,19 +458,6 @@ public actor CLISessionMonitorService {
               }
             }
 
-            // Verify branch matches to prevent session collision across repositories
-            // When a worktree path is reused by a different repository, branch names will differ
-            let branchMatches: Bool
-            if let sessionBranch = metadata?.branch {
-              branchMatches = sessionBranch == worktreeBranch
-            } else {
-              // No branch info - only assign to non-worktree entries (main repo)
-              branchMatches = !isWorktreeEntry
-            }
-
-            // Skip if branch doesn't match - session belongs to a different repo
-            guard branchMatches else { continue }
-
             // If no mapping exists, create one for this session
             if existingMappings?[sessionId] == nil {
               let mapping = SessionRepoMapping(
@@ -494,7 +481,7 @@ public actor CLISessionMonitorService {
             let session = CLISession(
               id: sessionId,
               projectPath: summary.project,
-              branchName: metadata?.branch ?? worktreeBranch,
+              branchName: worktreeBranch.isEmpty ? metadata?.branch : worktreeBranch,
               isWorktree: isWorktreeEntry,
               lastActivityAt: summary.lastActivityDate,
               messageCount: summary.messageCount,
@@ -528,19 +515,6 @@ public actor CLISessionMonitorService {
             }
           }
 
-          // Match by branch name as fallback
-          let branchMatches: Bool
-          if let sessionBranch = metadata?.branch {
-            // Session has branch info - match by branch
-            branchMatches = sessionBranch == worktreeBranch
-          } else {
-            // No branch info - only assign to main worktree (non-worktree entry)
-            // This handles old sessions that don't have gitBranch in their file
-            branchMatches = !isWorktreeEntry
-          }
-
-          guard branchMatches else { continue }
-
           // If no mapping exists, create one for this session
           if existingMappings?[sessionId] == nil {
             let mapping = SessionRepoMapping(
@@ -565,7 +539,7 @@ public actor CLISessionMonitorService {
           let session = CLISession(
             id: sessionId,
             projectPath: summary.project,
-            branchName: metadata?.branch ?? worktreeBranch,
+            branchName: worktreeBranch.isEmpty ? metadata?.branch : worktreeBranch,
             isWorktree: isWorktreeEntry,
             lastActivityAt: summary.lastActivityDate,
             messageCount: summary.messageCount,
@@ -777,7 +751,7 @@ public actor CLISessionMonitorService {
     return CLISession(
       id: sessionId,
       projectPath: projectPath,
-      branchName: branchName ?? worktree.branchName,
+      branchName: worktree.branchName ?? branchName,
       isWorktree: worktree.isWorktree,
       lastActivityAt: activityAt,
       messageCount: messageCount,

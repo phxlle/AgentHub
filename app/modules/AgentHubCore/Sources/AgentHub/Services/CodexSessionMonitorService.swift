@@ -241,7 +241,7 @@ public actor CodexSessionMonitorService {
       let session = CLISession(
         id: meta.sessionId,
         projectPath: meta.projectPath,
-        branchName: meta.branch ?? worktree.branchName,
+        branchName: worktree.branchName ?? meta.branch,
         isWorktree: worktree.isWorktree,
         lastActivityAt: lastActivity ?? meta.startedAt ?? Date(),
         messageCount: summary.messageCount,
@@ -293,7 +293,7 @@ public actor CodexSessionMonitorService {
         CLISession(
           id: meta.sessionId,
           projectPath: meta.projectPath,
-          branchName: meta.branch ?? worktree.branchName,
+          branchName: worktree.branchName ?? meta.branch,
           isWorktree: worktree.isWorktree,
           lastActivityAt: lastActivity ?? Date(),
           messageCount: summary.messageCount,
@@ -389,7 +389,7 @@ public actor CodexSessionMonitorService {
           let session = CLISession(
             id: meta.sessionId,
             projectPath: meta.projectPath,
-            branchName: meta.branch ?? worktree.name,
+            branchName: worktree.name.isEmpty ? meta.branch : worktree.name,
             isWorktree: worktree.isWorktree,
             lastActivityAt: lastActivityAt ?? Date(),
             messageCount: messageCount,
