@@ -66,6 +66,90 @@ struct AgentSessionWorkflowClassifierTests {
     #expect(branch.primaryReviewer == nil)
   }
 
+  @Test("AgentHub's independent reviewer prompt overrides implementation language")
+  func explicitIndependentReviewerOverridesImplementationLanguage() {
+    let reviewer = observation(
+      id: "generated-review",
+      provider: .claude,
+      branch: "XFA-3317-review",
+      message: """
+        You are the independent read-only review agent for XFA-3317.
+        The implementation was produced by Codex in another session.
+        Review the implementation request, implementation report, and current working tree.
+        """
+    )
+
+    let branch = AgentSessionWorkflowClassifier.classify([reviewer])[0]
+
+    #expect(branch.primaryImplementer == nil)
+    #expect(branch.primaryReviewer?.session.id == "generated-review")
+    #expect(branch.primaryReviewer?.roleConfidence == .high)
+  }
+
+  @Test("Uncertain automatic workflows remain hidden")
+  func uncertainAutomaticWorkflowsRemainHidden() {
+    let noTicket = AgentSessionWorkflowClassifier.classify([
+      observation(
+        id: "no-ticket",
+        provider: .codex,
+        branch: "main",
+        message: "Investigate the current issue"
+      )
+    ])
+    let weakTicket = AgentSessionWorkflowClassifier.classify([
+      observation(
+        id: "weak-ticket",
+        provider: .codex,
+        branch: "main",
+        message: "Investigate XFA-9000"
+      )
+    ])
+
+    #expect(AgentSessionWorkflowClassifier.workflows(from: noTicket, scope: .active).isEmpty)
+    #expect(AgentSessionWorkflowClassifier.workflows(from: weakTicket, scope: .active).isEmpty)
+  }
+
+  @Test("Two sessions mentioning the same Jira ticket form a confident workflow")
+  func duplicateTicketEvidenceFormsConfidentWorkflow() {
+    let branches = AgentSessionWorkflowClassifier.classify([
+      observation(
+        id: "ticket-implementation",
+        provider: .codex,
+        branch: "main",
+        message: "Implement XFA-9001"
+      ),
+      observation(
+        id: "ticket-review",
+        provider: .claude,
+        branch: "main",
+        message: "Review XFA-9001"
+      ),
+    ])
+
+    let workflows = AgentSessionWorkflowClassifier.workflows(from: branches, scope: .active)
+
+    #expect(workflows.count == 1)
+    #expect(workflows[0].ticketKey == "XFA-9001")
+  }
+
+  @Test("Manual workflows always remain visible")
+  func manualWorkflowsAlwaysRemainVisible() {
+    var branch = AgentSessionWorkflowClassifier.classify([
+      observation(
+        id: "manual-session",
+        provider: .codex,
+        branch: "main",
+        message: "Investigate the current issue"
+      )
+    ])[0]
+    branch.manualWorkflowID = "manual:kept"
+
+    let workflows = AgentSessionWorkflowClassifier.workflows(from: [branch], scope: .active)
+
+    #expect(workflows.count == 1)
+    #expect(workflows[0].id == "manual:kept")
+  }
+
   @Test("Only merged pull request workflows appear under Completed")
   func mergedPullRequestsMoveToCompleted() {
     var merged = AgentSessionWorkflowClassifier.classify([

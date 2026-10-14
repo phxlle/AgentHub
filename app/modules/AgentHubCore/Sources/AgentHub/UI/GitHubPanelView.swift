@@ -15,6 +15,7 @@ import SwiftUI
 public struct GitHubPanelView: View {
   let projectPath: String
   let branchName: String?
+  let linkedPullRequests: [GitHubPullRequestURLReference]
   let onDismiss: () -> Void
   var isEmbedded: Bool = false
   var onSendToSession: ((String, CLISession) -> Void)?
@@ -29,6 +30,7 @@ public struct GitHubPanelView: View {
   public init(
     projectPath: String,
     branchName: String? = nil,
+    linkedPullRequests: [GitHubPullRequestURLReference] = [],
     onDismiss: @escaping () -> Void,
     isEmbedded: Bool = false,
     session: CLISession? = nil,
@@ -39,6 +41,7 @@ public struct GitHubPanelView: View {
   ) {
     self.projectPath = projectPath
     self.branchName = branchName
+    self.linkedPullRequests = linkedPullRequests
     self.onDismiss = onDismiss
     self.isEmbedded = isEmbedded
     self.session = session
@@ -55,28 +58,52 @@ public struct GitHubPanelView: View {
       content
     }
     .frame(
-      minWidth: isEmbedded ? 300 : 700, idealWidth: isEmbedded ? .infinity : 950, maxWidth: .infinity,
-      minHeight: isEmbedded ? 300 : 550, idealHeight: isEmbedded ? .infinity : 750, maxHeight: .infinity
+      minWidth: isEmbedded ? 300 : 700, idealWidth: isEmbedded ? .infinity : 950,
+      maxWidth: .infinity,
+      minHeight: isEmbedded ? 300 : 550, idealHeight: isEmbedded ? .infinity : 750,
+      maxHeight: .infinity
     )
     .background(panelBackground)
-    .task {
-      if !viewModel.isConfigured(repoPath: projectPath, branchName: branchName) {
-        await viewModel.setup(repoPath: projectPath, branchName: branchName)
+    .task(id: panelContextID) {
+      if !viewModel.isConfigured(
+        repoPath: projectPath,
+        branchName: branchName,
+        sessionID: session?.id,
+        linkedPullRequests: linkedPullRequests
+      ) {
+        await viewModel.setup(
+          repoPath: projectPath,
+          branchName: branchName,
+          sessionID: session?.id,
+          linkedPullRequests: linkedPullRequests
+        )
       }
       if viewModel.setupState == .ready {
         await viewModel.loadPanelOverview()
+        await viewModel.focusPreferredPullRequestIfAvailable()
       }
     }
-    .alert("Error", isPresented: .init(
-      get: { viewModel.errorMessage != nil },
-      set: { if !$0 { viewModel.errorMessage = nil } }
-    )) {
+    .alert(
+      "Error",
+      isPresented: .init(
+        get: { viewModel.errorMessage != nil },
+        set: { if !$0 { viewModel.errorMessage = nil } }
+      )
+    ) {
       Button("OK") { viewModel.errorMessage = nil }
     } message: {
       if let msg = viewModel.errorMessage {
         Text(msg)
       }
     }
+  }
+
+  private var panelContextID: String {
+    let pullRequests =
+      linkedPullRequests
+      .map { "\($0.owner.lowercased())/\($0.repository.lowercased())#\($0.number)" }
+      .joined(separator: ",")
+    return "\(session?.id ?? "")|\(projectPath)|\(branchName ?? "")|\(pullRequests)"
   }
 
   // MARK: - Header
@@ -99,7 +126,9 @@ public struct GitHubPanelView: View {
       Spacer()
 
       if isEmbedded, let onPopOut {
-        Button { onPopOut(viewModel) } label: {
+        Button {
+          onPopOut(viewModel)
+        } label: {
           Image(systemName: "rectangle.portrait.and.arrow.right")
             .font(.system(size: 14))
             .foregroundStyle(.secondary)
@@ -112,7 +141,7 @@ public struct GitHubPanelView: View {
         viewModel.stopObserving()
         onDismiss()
       }
-        .controlSize(.small)
+      .controlSize(.small)
     }
     .padding(.horizontal, DesignTokens.Spacing.sm)
     .frame(height: AgentHubLayout.topBarHeight)
@@ -229,7 +258,8 @@ public struct GitHubPanelView: View {
           Task { await viewModel.loadPullRequests() }
         }
       case .loaded where viewModel.pullRequests.isEmpty:
-        emptyView("No pull requests", "No \(viewModel.prFilter.rawValue.lowercased()) pull requests found.")
+        emptyView(
+          "No pull requests", "No \(viewModel.prFilter.rawValue.lowercased()) pull requests found.")
       default:
         sectionedPRList
       }
@@ -646,7 +676,9 @@ struct FilterChipWithCount: View {
     }
     .buttonStyle(.agentHubOutlined)
     .background(activeBackground)
-    .clipShape(RoundedRectangle(cornerRadius: AgentHubLayout.buttonCornerRadius, style: .continuous))
+    .clipShape(
+      RoundedRectangle(cornerRadius: AgentHubLayout.buttonCornerRadius, style: .continuous)
+    )
     .fixedSize()
   }
 
@@ -853,7 +885,7 @@ private struct PRStatusDot: View {
 
   private var color: Color {
     switch state {
-    case .open:   return isDraft ? .secondary : GitHubPalette.open
+    case .open: return isDraft ? .secondary : GitHubPalette.open
     case .closed: return GitHubPalette.closed
     case .merged: return GitHubPalette.merged
     case .unknown: return .secondary

@@ -105,6 +105,63 @@ struct EmbeddedTerminalLaunchBuilderAgentHubCLITests {
     #expect(environment["AGENTHUB_SESSION_ID"] == "session-123")
   }
 
+  @Test("Claude MCP configuration is passed through a short protected file")
+  func claudeMCPConfigurationIsPassedThroughProtectedFile() throws {
+    let directory = try makeTemporaryDirectory(named: "AgentHubClaudeMCPConfig")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let configuration = """
+      {"mcpServers":{"agenthub":{"command":"/bin/sh","args":["-lc","\(String(repeating: "x", count: 2_000))"]}}}
+      """
+
+    let arguments = try ClaudeMCPConfigurationMaterializer.materialize(
+      arguments: ["--mcp-config", configuration, "Review this implementation"],
+      directory: directory
+    )
+
+    #expect(arguments.count == 3)
+    let configurationPath = arguments[1]
+    #expect(configurationPath.hasPrefix(directory.path))
+    #expect(configurationPath.count < configuration.count)
+    #expect(arguments[2] == "Review this implementation")
+    #expect(try String(contentsOfFile: configurationPath, encoding: .utf8) == configuration)
+
+    let attributes = try FileManager.default.attributesOfItem(atPath: configurationPath)
+    let permissions = try #require(attributes[.posixPermissions] as? NSNumber)
+    #expect(permissions.intValue == 0o600)
+  }
+
+  @Test("Claude launch materializes its MCP configuration before shell construction")
+  func claudeLaunchMaterializesMCPConfigurationBeforeShellConstruction() throws {
+    let directory = try makeTemporaryDirectory(named: "AgentHubClaudeLaunchConfig")
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let result = EmbeddedTerminalLaunchBuilder.cliLaunch(
+      sessionId: nil,
+      projectPath: "/tmp",
+      cliConfiguration: CLICommandConfiguration(command: "echo", additionalPaths: ["/bin"], mode: .claude),
+      initialPrompt: "Review this implementation",
+      dangerouslySkipPermissions: false,
+      permissionModePlan: false,
+      worktreeName: nil,
+      metadataStore: nil,
+      agentHubCLIPath: agentHubCLIPath,
+      installAgentHubWorktreeSkill: {},
+      claudeMCPConfigDirectory: directory
+    )
+
+    guard case .success(let launch) = result else {
+      Issue.record("Expected launch builder success")
+      return
+    }
+
+    #expect(launch.shellCommand.contains("--mcp-config"))
+    #expect(launch.shellCommand.contains(directory.path))
+    #expect(launch.shellCommand.contains("'--' 'Review this implementation'"))
+    #expect(!launch.shellCommand.contains("mcpServers"))
+    #expect(!launch.shellCommand.contains(String(repeating: "x", count: 100)))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 1)
+  }
+
   @Test("Claude launch passes raw prompt, AgentHub MCP config, and installs worktree skill", .disabled("headless-quarantine: test-vs-code drift — JSON forward-slash escaping; see TestQuarantine.md"))
   func claudeLaunchPassesRawPromptAgentHubMCPConfigAndInstallsWorktreeSkill() throws {
     var installCount = 0
@@ -373,6 +430,8 @@ struct EmbeddedTerminalLaunchBuilderAgentHubCLITests {
 
   @Test("Session naming context is baked into the AgentHub MCP server command", arguments: [CLICommandMode.claude, .codex])
   func sessionNamingContextIsBakedIntoMCPServerCommand(mode: CLICommandMode) throws {
+    let directory = try makeTemporaryDirectory(named: "AgentHubSessionNamingConfig")
+    defer { try? FileManager.default.removeItem(at: directory) }
     let result = EmbeddedTerminalLaunchBuilder.cliLaunch(
       sessionId: "session-123",
       projectPath: "/tmp/project",
@@ -384,6 +443,7 @@ struct EmbeddedTerminalLaunchBuilderAgentHubCLITests {
       metadataStore: nil,
       agentHubCLIPath: agentHubCLIPath,
       installAgentHubWorktreeSkill: {},
+      claudeMCPConfigDirectory: directory,
       studioGuidanceEnabled: false
     )
 
@@ -394,11 +454,23 @@ struct EmbeddedTerminalLaunchBuilderAgentHubCLITests {
 
     // The MCP server must not depend on the provider forwarding our environment:
     // without AGENTHUB_PROVIDER, agenthub_name_session refuses to run. Values are
-    // asserted at argument level in AIConfigSettingsTests (here they're re-escaped
-    // for the shell), so this only checks the exports reach the launch command.
-    #expect(launch.shellCommand.contains("export AGENTHUB_PROVIDER"))
-    #expect(launch.shellCommand.contains("export AGENTHUB_PROJECT_PATH"))
-    #expect(launch.shellCommand.contains("export AGENTHUB_SESSION_ID"))
+    // asserted at argument level in AIConfigSettingsTests. This checks the
+    // exports reach either Claude's config file or Codex's launch command.
+    let mcpConfiguration: String
+    switch mode {
+    case .claude:
+      let fileName = try #require(FileManager.default.contentsOfDirectory(atPath: directory.path).first)
+      mcpConfiguration = try String(
+        contentsOf: directory.appendingPathComponent(fileName),
+        encoding: .utf8
+      )
+    case .codex:
+      mcpConfiguration = launch.shellCommand
+    }
+
+    #expect(mcpConfiguration.contains("export AGENTHUB_PROVIDER"))
+    #expect(mcpConfiguration.contains("export AGENTHUB_PROJECT_PATH"))
+    #expect(mcpConfiguration.contains("export AGENTHUB_SESSION_ID"))
   }
 
   @Test("Pending session ids are not baked into the AgentHub MCP server command")

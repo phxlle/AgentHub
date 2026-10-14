@@ -176,7 +176,8 @@ public enum SessionStatus: Equatable, Sendable {
     case .waitingForUser:
       return "Ready"
     case .awaitingApproval(let tool):
-      return "Awaiting approval: \(tool)"
+      return SessionInteractiveInputTool.matches(tool)
+        ? "Input needed" : "Awaiting approval: \(tool)"
     case .idle:
       return "Idle"
     }
@@ -190,8 +191,10 @@ public enum SessionStatus: Equatable, Sendable {
       return "gearshape"
     case .waitingForUser:
       return "checkmark.circle"
-    case .awaitingApproval:
-      return "exclamationmark.circle"
+    case .awaitingApproval(let tool):
+      return SessionInteractiveInputTool.matches(tool)
+        ? "bubble.left.and.exclamationmark.bubble.right"
+        : "exclamationmark.circle"
     case .idle:
       return "circle"
     }
@@ -210,6 +213,17 @@ public enum SessionStatus: Equatable, Sendable {
     case .idle:
       return "gray"
     }
+  }
+}
+
+/// Provider tools that pause an agent turn until the user answers an explicit
+/// question. These are input requests, not tool approvals and not ordinary
+/// completed assistant responses.
+public enum SessionInteractiveInputTool {
+  public static func matches(_ toolName: String) -> Bool {
+    let normalized = toolName.lowercased().filter(\.isLetter)
+    return normalized.hasSuffix("requestuserinput")
+      || normalized.hasSuffix("askuserquestion")
   }
 }
 

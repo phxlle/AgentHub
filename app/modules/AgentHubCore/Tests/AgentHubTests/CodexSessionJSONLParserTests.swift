@@ -78,6 +78,59 @@ struct CodexSessionJSONLParserTests {
     #expect(result.lastAssistantMessage == "Implementation complete.")
   }
 
+  @Test("Keeps an explicit user-input request active until it is answered")
+  func detectsPendingUserInputRequest() {
+    let timestamp = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600))
+    let line = jsonLine([
+      "type": "response_item",
+      "timestamp": timestamp,
+      "payload": [
+        "type": "function_call",
+        "name": "request_user_input",
+        "call_id": "question-1",
+        "arguments": "{\"questions\":[]}",
+      ],
+    ])
+
+    var result = CodexSessionJSONLParser.ParseResult()
+    CodexSessionJSONLParser.parseNewLines([line], into: &result)
+
+    #expect(result.currentStatus == .awaitingApproval(tool: "request_user_input"))
+    #expect(SidebarSessionAttention(status: result.currentStatus) == .inputRequired)
+  }
+
+  @Test("Clears user-input attention after the answer is recorded")
+  func clearsAnsweredUserInputRequest() {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let lines = [
+      jsonLine([
+        "type": "response_item",
+        "timestamp": timestamp,
+        "payload": [
+          "type": "function_call",
+          "name": "request_user_input",
+          "call_id": "question-1",
+          "arguments": "{\"questions\":[]}",
+        ],
+      ]),
+      jsonLine([
+        "type": "response_item",
+        "timestamp": timestamp,
+        "payload": [
+          "type": "function_call_output",
+          "call_id": "question-1",
+          "output": "answered",
+        ],
+      ]),
+    ]
+
+    var result = CodexSessionJSONLParser.ParseResult()
+    CodexSessionJSONLParser.parseNewLines(lines, into: &result)
+
+    #expect(result.currentStatus == .thinking)
+    #expect(SidebarSessionAttention(status: result.currentStatus) == nil)
+  }
+
   @Test("Caps detected resource links to the newest fifty URLs")
   func capsDetectedResourceLinks() {
     let lines = (1...55).map { index in

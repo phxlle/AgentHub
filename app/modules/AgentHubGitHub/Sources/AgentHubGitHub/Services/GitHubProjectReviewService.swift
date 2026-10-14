@@ -12,6 +12,28 @@ public protocol GitHubProjectReviewServiceProtocol: Sendable {
     view: GitHubProjectView,
     limit: Int
   ) async throws -> [GitHubProjectPullRequest]
+  /// When the exhausted GitHub API quota frees up, to explain a rate-limit error.
+  func rateLimitResetDate() async -> Date?
+  /// The GitHub login `gh` is authenticated as.
+  func viewerLogin() async -> String?
+  /// Pull requests mentioning any of the ticket keys, grouped per key, with whether
+  /// each is approved. Batched: a few searches for a whole sprint.
+  func ticketPullRequests(forKeys keys: [String], owner: String?) async throws
+    -> [String: [GitHubTicketPullRequest]]
+  /// Pull requests whose title or body mentions `text` (e.g. a Jira key), open first.
+  func searchPullRequests(mentioning text: String, owner: String?) async throws
+    -> [GitHubProjectPullRequest]
+}
+
+extension GitHubProjectReviewServiceProtocol {
+  public func rateLimitResetDate() async -> Date? { nil }
+  public func viewerLogin() async -> String? { nil }
+  public func ticketPullRequests(forKeys keys: [String], owner: String?) async throws
+    -> [String: [GitHubTicketPullRequest]]
+  { [:] }
+  public func searchPullRequests(mentioning text: String, owner: String?) async throws
+    -> [GitHubProjectPullRequest]
+  { [] }
 }
 
 public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
@@ -25,6 +47,11 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
     let statusPredicates: [StatusPredicate]
     let state: String?
     let merged: Bool?
+  }
+
+  struct ProjectFieldValues: Equatable, Sendable {
+    let status: String?
+    let priority: String?
   }
 
   private struct SearchPullRequest: Decodable {
@@ -80,6 +107,137 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
     return try Self.decodeProjects(json)
   }
 
+  /// Uses GitHub's search API, which has its own quota (30 requests a minute),
+  /// separate from the GraphQL quota reviews and PR status use.
+  public func searchPullRequests(mentioning text: String, owner: String?) async throws
+    -> [GitHubProjectPullRequest]
+  {
+    var arguments = [
+      "search", "prs", text,
+      "--limit", "20",
+      "--json", "id,number,title,url,repository,author,updatedAt,isDraft,state",
+    ]
+    if let owner, !owner.isEmpty { arguments += ["--owner", owner] }
+    let json = try await cli.runAuthenticatedCommand(arguments, timeout: 30)
+    return Self.sortedForTicket(try Self.decodeSearchPullRequests(json))
+  }
+
+  /// Open pull requests first, then most recently updated.
+  static func sortedForTicket(_ pullRequests: [GitHubProjectPullRequest]) -> [GitHubProjectPullRequest] {
+    pullRequests.sorted { lhs, rhs in
+      let lhsOpen = lhs.state.lowercased() == "open"
+      let rhsOpen = rhs.state.lowercased() == "open"
+      if lhsOpen != rhsOpen { return lhsOpen }
+      return (lhs.updatedAt ?? .distantPast) > (rhs.updatedAt ?? .distantPast)
+    }
+  }
+
+  public func ticketPullRequests(forKeys keys: [String], owner: String?) async throws
+    -> [String: [GitHubTicketPullRequest]]
+  {
+    var result: [String: [GitHubTicketPullRequest]] = [:]
+    // GitHub search allows at most five OR operators per query.
+    for start in stride(from: 0, to: keys.count, by: 6) {
+      let chunk = Array(keys[start..<min(start + 6, keys.count)])
+      let terms = Self.orTerms(chunk)
+      let all = try await searchWithBody(terms: terms, owner: owner, approvedOnly: false)
+      let approvedURLs = Set(
+        try await searchWithBody(terms: terms, owner: owner, approvedOnly: true).map(\.pullRequest.url))
+      for (key, pullRequests) in Self.groupByMentionedKey(all, keys: chunk) {
+        result[key] = pullRequests.map {
+          GitHubTicketPullRequest(pullRequest: $0, isApproved: approvedURLs.contains($0.url))
+        }
+      }
+    }
+    return result
+  }
+
+  /// `gh` quotes a single argument with spaces as a phrase, so `OR` must be its own argument.
+  static func orTerms(_ keys: [String]) -> [String] {
+    keys.enumerated().flatMap { index, key in index == 0 ? [key] : ["OR", key] }
+  }
+
+  private func searchWithBody(terms: [String], owner: String?, approvedOnly: Bool) async throws
+    -> [(pullRequest: GitHubProjectPullRequest, body: String)]
+  {
+    var arguments = ["search", "prs"] + terms + [
+      "--limit", "100",
+      "--json", "id,number,title,url,repository,author,updatedAt,isDraft,state,body",
+    ]
+    if approvedOnly { arguments += ["--review", "approved"] }
+    if let owner, !owner.isEmpty { arguments += ["--owner", owner] }
+    let json = try await cli.runAuthenticatedCommand(arguments, timeout: 30)
+    let pullRequests = try Self.decodeSearchPullRequests(json)
+    let bodies = Self.decodeBodies(json)
+    return pullRequests.map { ($0, bodies[$0.url] ?? "") }
+  }
+
+  static func decodeBodies(_ json: String) -> [String: String] {
+    guard let data = json.data(using: .utf8),
+      let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+    else { return [:] }
+    var bodies: [String: String] = [:]
+    for item in items {
+      if let url = item["url"] as? String { bodies[url] = item["body"] as? String ?? "" }
+    }
+    return bodies
+  }
+
+  /// A pull request belongs to a key when its title or body mentions it exactly
+  /// (`XFA-12` does not match `XFA-123`).
+  static func groupByMentionedKey(
+    _ items: [(pullRequest: GitHubProjectPullRequest, body: String)],
+    keys: [String]
+  ) -> [String: [GitHubProjectPullRequest]] {
+    var grouped: [String: [GitHubProjectPullRequest]] = [:]
+    for item in items {
+      let text = item.pullRequest.title + "\n" + item.body
+      for key in keys where mentions(text, key: key) {
+        grouped[key, default: []].append(item.pullRequest)
+      }
+    }
+    return grouped
+  }
+
+  static func mentions(_ text: String, key: String) -> Bool {
+    let pattern = "(?<![A-Za-z0-9])" + NSRegularExpression.escapedPattern(for: key) + "(?![0-9])"
+    return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+  }
+
+  /// One REST call (`/user`), not GraphQL.
+  public func viewerLogin() async -> String? {
+    guard let output = try? await cli.runAuthenticatedCommand(["api", "user", "--jq", ".login"], timeout: 15)
+    else { return nil }
+    let login = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    return login.isEmpty ? nil : login
+  }
+
+  /// `gh api rate_limit` does not count against the quota it reports.
+  public func rateLimitResetDate() async -> Date? {
+    guard let json = try? await cli.runAuthenticatedCommand(["api", "rate_limit"], timeout: 15)
+    else { return nil }
+    return Self.rateLimitResetDate(fromRateLimitJSON: json)
+  }
+
+  /// The reset of an exhausted bucket (GraphQL first, it is what reviews use),
+  /// otherwise the GraphQL reset.
+  static func rateLimitResetDate(fromRateLimitJSON json: String) -> Date? {
+    guard
+      let data = json.data(using: .utf8),
+      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let resources = object["resources"] as? [String: Any]
+    else { return nil }
+    func bucket(_ name: String) -> (remaining: Int, reset: Date)? {
+      guard let entry = resources[name] as? [String: Any],
+        let remaining = entry["remaining"] as? Int,
+        let reset = entry["reset"] as? Double
+      else { return nil }
+      return (remaining, Date(timeIntervalSince1970: reset))
+    }
+    let buckets = ["graphql", "core", "search"].compactMap(bucket)
+    return buckets.first(where: { $0.remaining == 0 })?.reset ?? bucket("graphql")?.reset
+  }
+
   public func listPullRequests(
     project: GitHubReviewProject,
     view: GitHubProjectView,
@@ -107,17 +265,17 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
     var pullRequests = try Self.decodeSearchPullRequests(json)
       .filter { !$0.isDraft }
 
-    guard !plan.statusPredicates.isEmpty, !pullRequests.isEmpty else {
-      return pullRequests
-    }
+    guard !pullRequests.isEmpty else { return [] }
 
-    let statuses = try await projectStatuses(
+    let projectFields = try await projectFieldValues(
       pullRequestIDs: pullRequests.map(\.id),
       projectID: project.id
     )
     pullRequests = pullRequests.compactMap { pullRequest in
-      let status = statuses[pullRequest.id] ?? nil
-      guard Self.matches(status: status, predicates: plan.statusPredicates) else { return nil }
+      let fields = projectFields[pullRequest.id]
+      guard Self.matches(status: fields?.status, predicates: plan.statusPredicates) else {
+        return nil
+      }
       return GitHubProjectPullRequest(
         id: pullRequest.id,
         number: pullRequest.number,
@@ -129,17 +287,18 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
         updatedAt: pullRequest.updatedAt,
         isDraft: pullRequest.isDraft,
         state: pullRequest.state,
-        projectStatus: status
+        projectStatus: fields?.status,
+        projectPriority: fields?.priority
       )
     }
     return pullRequests
   }
 
-  private func projectStatuses(
+  private func projectFieldValues(
     pullRequestIDs: [String],
     projectID: String
-  ) async throws -> [String: String?] {
-    var result: [String: String?] = [:]
+  ) async throws -> [String: ProjectFieldValues] {
+    var result: [String: ProjectFieldValues] = [:]
     for batchStart in stride(from: 0, to: pullRequestIDs.count, by: 50) {
       let batchEnd = min(batchStart + 50, pullRequestIDs.count)
       let batch = Array(pullRequestIDs[batchStart..<batchEnd])
@@ -151,7 +310,10 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
               projectItems(first: 100) {
                 nodes {
                   project { id }
-                  fieldValueByName(name: "Status") {
+                  status: fieldValueByName(name: "Status") {
+                    ... on ProjectV2ItemFieldSingleSelectValue { name }
+                  }
+                  priority: fieldValueByName(name: "Priority") {
                     ... on ProjectV2ItemFieldSingleSelectValue { name }
                   }
                 }
@@ -165,9 +327,9 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
         arguments += ["-F", "ids[]=\(id)"]
       }
       let json = try await cli.runAuthenticatedCommand(arguments, timeout: 45)
-      let decoded = try Self.decodeProjectStatuses(json, projectID: projectID)
-      for (id, status) in decoded {
-        result[id] = status
+      let decoded = try Self.decodeProjectFieldValues(json, projectID: projectID)
+      for (id, values) in decoded {
+        result[id] = values
       }
     }
     return result
@@ -282,7 +444,8 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
           updatedAt: pullRequest.updatedAt,
           isDraft: pullRequest.isDraft,
           state: pullRequest.state,
-          projectStatus: nil
+          projectStatus: nil,
+          projectPriority: nil
         )
       }
     } catch {
@@ -290,10 +453,10 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
     }
   }
 
-  static func decodeProjectStatuses(
+  static func decodeProjectFieldValues(
     _ json: String,
     projectID: String
-  ) throws -> [String: String?] {
+  ) throws -> [String: ProjectFieldValues] {
     guard let data = json.data(using: .utf8),
       let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       let dataObject = root["data"] as? [String: Any],
@@ -302,10 +465,10 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
       throw GitHubCLIError.parseError("Invalid project status response")
     }
 
-    var statuses: [String: String?] = [:]
+    var fieldValues: [String: ProjectFieldValues] = [:]
     for case let node as [String: Any] in nodes {
       guard let id = node["id"] as? String else { continue }
-      var matchingStatus: String?
+      var matchingValues: ProjectFieldValues?
       if let projectItems = node["projectItems"] as? [String: Any],
         let itemNodes = projectItems["nodes"] as? [[String: Any]]
       {
@@ -313,15 +476,17 @@ public actor GitHubProjectReviewService: GitHubProjectReviewServiceProtocol {
           guard let project = item["project"] as? [String: Any],
             project["id"] as? String == projectID
           else { continue }
-          if let value = item["fieldValueByName"] as? [String: Any] {
-            matchingStatus = value["name"] as? String
-          }
+          let status = (item["status"] as? [String: Any])?["name"] as? String
+          let priority = (item["priority"] as? [String: Any])?["name"] as? String
+          matchingValues = ProjectFieldValues(status: status, priority: priority)
           break
         }
       }
-      statuses[id] = matchingStatus
+      if let matchingValues {
+        fieldValues[id] = matchingValues
+      }
     }
-    return statuses
+    return fieldValues
   }
 
   private static func parseProjectConnection(

@@ -39,7 +39,7 @@ public struct MonitoringCardView: View {
   let onShowPlan: ((CLISession, PlanState) -> Void)?
   let onShowWebPreview: ((CLISession, String, WebPreviewMode) -> Void)?
   let onShowMermaid: ((CLISession) -> Void)?
-  let onShowGitHub: ((CLISession, String) -> Void)?
+  let onShowGitHub: ((CLISession, String, [GitHubPullRequestURLReference]) -> Void)?
   let onShowPendingChanges: ((CLISession, PendingToolUse) -> Void)?
   let onShowMCPApp: ((CLISession, String) -> Void)?
   let onShowMeasurement: ((CLISession) -> Void)?
@@ -97,7 +97,8 @@ public struct MonitoringCardView: View {
     onShowPlan: ((CLISession, PlanState) -> Void)? = nil,
     onShowWebPreview: ((CLISession, String, WebPreviewMode) -> Void)? = nil,
     onShowMermaid: ((CLISession) -> Void)? = nil,
-    onShowGitHub: ((CLISession, String) -> Void)? = nil,
+    onShowGitHub:
+      ((CLISession, String, [GitHubPullRequestURLReference]) -> Void)? = nil,
     onShowPendingChanges: ((CLISession, PendingToolUse) -> Void)? = nil,
     onShowMCPApp: ((CLISession, String) -> Void)? = nil,
     onShowMeasurement: ((CLISession) -> Void)? = nil,
@@ -263,7 +264,30 @@ public struct MonitoringCardView: View {
 
   /// Memoized: read from `body`, so it re-parsed every detected link on each render.
   private var linkedPullRequests: [GitHubPullRequestURLReference] {
-    GitHubPullRequestURLReferenceCache.references(in: resourceLinks.map(\.url))
+    let detected = GitHubPullRequestURLReferenceCache.references(in: resourceLinks.map(\.url))
+    let itemID = SidebarSessionItemID.monitored(provider: providerKind, sessionId: session.id)
+    let provider = viewModel?.agentHubProvider ?? agentHub
+    let associated =
+      provider?.gitHubReviewsViewModel
+      .linkedPullRequestReferencesByItemID(provider: providerKind)[itemID] ?? []
+    var seen: Set<GitHubPullRequestURLReference> = []
+    return (detected + associated).filter { seen.insert($0).inserted }
+  }
+
+  private var hubProvider: AgentHubProvider? {
+    viewModel?.agentHubProvider ?? agentHub
+  }
+
+  /// Jira ticket this session works on, from its branch, name, or first prompt.
+  private var linkedTicketKey: String? {
+    guard let jira = hubProvider?.jiraSprintViewModel else { return nil }
+    return jira.sessionLinker.cachedKeys(
+      id: SidebarSessionItemID.monitored(provider: providerKind, sessionId: session.id),
+      branchName: session.branchName,
+      customName: viewModel?.sessionCustomNames[session.id],
+      prompt: session.firstMessage,
+      knownProjectKeys: jira.knownProjectKeys
+    ).first
   }
 
   private var localDiffSummary: LocalDiffSummary? {
@@ -277,7 +301,8 @@ public struct MonitoringCardView: View {
   }
 
   private var gitHubQuickAccessCoordinator: (any SessionGitHubQuickAccessCoordinatorProtocol)? {
-    viewModel?.agentHubProvider?.gitHubQuickAccessCoordinator ?? agentHub?.gitHubQuickAccessCoordinator
+    viewModel?.agentHubProvider?.gitHubQuickAccessCoordinator
+      ?? agentHub?.gitHubQuickAccessCoordinator
   }
 
   private var gitHubPRObservationService: (any GitHubPRObservationServiceProtocol)? {
@@ -332,7 +357,7 @@ public struct MonitoringCardView: View {
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .stroke(
           showPrimaryIndicator && isPrimarySession
-           ? Color.brandPrimary(for: providerKind)
+            ? Color.brandPrimary(for: providerKind)
             : Color.clear,
           lineWidth: 1
         )
@@ -344,6 +369,10 @@ public struct MonitoringCardView: View {
     .animation(.easeInOut(duration: 0.2), value: isDragging)
     .task(id: session.projectPath) {
       await loadWebPreviewCandidateIfNeeded()
+    }
+    .task {
+      // Project keys come from Jira; without them branch names can't be matched.
+      await hubProvider?.jiraSprintViewModel.loadIfNeeded()
     }
     .task(id: session.projectPath) {
       await viewModel?.ensureProjectCapabilities(for: session.projectPath)
@@ -368,7 +397,9 @@ public struct MonitoringCardView: View {
         try? await Task.sleep(for: .seconds(2))
         guard !Task.isCancelled else { return }
       }
-      if let notifier = viewModel?.agentHubProvider?.gitHubCIFailureNotifier ?? agentHub?.gitHubCIFailureNotifier {
+      if let notifier = viewModel?.agentHubProvider?.gitHubCIFailureNotifier
+        ?? agentHub?.gitHubCIFailureNotifier
+      {
         let context = GitHubCIFailureSessionContext(
           sessionId: session.id,
           providerKind: providerKind,
@@ -487,9 +518,11 @@ public struct MonitoringCardView: View {
     key: String,
     viewModel: CLISessionsViewModel
   ) -> Bool {
-    guard let provider = providers.first(where: {
-      $0.hasItemConformingToTypeIdentifier(GitHubContextDragPayload.typeIdentifier)
-    }) else {
+    guard
+      let provider = providers.first(where: {
+        $0.hasItemConformingToTypeIdentifier(GitHubContextDragPayload.typeIdentifier)
+      })
+    else {
       return false
     }
 
@@ -659,9 +692,10 @@ public struct MonitoringCardView: View {
         }
       }
       .buttonStyle(.agentHubOutlined)
-      .help(queuedPreviewContextCount > 0
-        ? "Preview localhost web app (\(queuedPreviewContextCount) queued updates pending next send)"
-        : "Preview localhost web app")
+      .help(
+        queuedPreviewContextCount > 0
+          ? "Preview localhost web app (\(queuedPreviewContextCount) queued updates pending next send)"
+          : "Preview localhost web app")
     }
   }
 
@@ -672,7 +706,7 @@ public struct MonitoringCardView: View {
   }
 
   private func presentGitHubPanel() {
-    onShowGitHub?(session, session.projectPath)
+    onShowGitHub?(session, session.projectPath, linkedPullRequests)
   }
 
   private var gitHubObservationTaskID: String {
@@ -683,7 +717,8 @@ public struct MonitoringCardView: View {
     )
   }
 
-  private static let createPullRequestPrompt = "Make a PR for the current branch. Include the local changes in this worktree and use the session context for the title, body, and validation notes."
+  private static let createPullRequestPrompt =
+    "Make a PR for the current branch. Include the local changes in this worktree and use the session context for the title, body, and validation notes."
 
   private func createPullRequestFromSession() {
     guard let viewModel else { return }
@@ -734,7 +769,9 @@ public struct MonitoringCardView: View {
       Circle()
         .fill(isHighlighted ? Color.brandPrimary(for: providerKind) : .gray.opacity(0.3))
         .frame(width: 10, height: 10)
-        .shadow(color: isHighlighted ? Color.brandPrimary(for: providerKind).opacity(0.6) : .clear, radius: 4)
+        .shadow(
+          color: isHighlighted ? Color.brandPrimary(for: providerKind).opacity(0.6) : .clear,
+          radius: 4)
 
       // Session label - show custom name, slug, or default ID
       if let customName = viewModel?.sessionCustomNames[session.id] {
@@ -775,7 +812,8 @@ public struct MonitoringCardView: View {
       HStack(spacing: 6) {
         // Pending changes preview button - show immediately when code change tool is detected
         if let pendingToolUse = state?.pendingToolUse,
-           pendingToolUse.isCodeChangeTool {
+          pendingToolUse.isCodeChangeTool
+        {
           Button(action: {
             onShowPendingChanges?(session, pendingToolUse)
           }) {
@@ -989,7 +1027,7 @@ public struct MonitoringCardView: View {
           onConnect()
           showingActionsPopover = false
         }
-      } 
+      }
       PopoverButton(icon: "pencil", title: "Name Session") {
         showingActionsPopover = false
         showingNameSheet = true
@@ -1024,6 +1062,13 @@ public struct MonitoringCardView: View {
       session: session,
       providerKind: providerKind,
       isWorktree: isWorktreeSession,
+      linkedPullRequest: linkedPullRequests.last,
+      linkedTicketKey: linkedTicketKey,
+      onOpenReview: { reference in
+        hubProvider?.showReview(
+          owner: reference.owner, repository: reference.repository, number: reference.number)
+      },
+      onOpenTicket: { key in hubProvider?.showJiraTicket(key) },
       contentMode: $contentMode,
       availableContentModes: availableContentModes
     )
@@ -1139,6 +1184,10 @@ private struct MonitoringCardPathRow: View {
   let session: CLISession
   let providerKind: SessionProviderKind
   let isWorktree: Bool
+  let linkedPullRequest: GitHubPullRequestURLReference?
+  let linkedTicketKey: String?
+  let onOpenReview: (GitHubPullRequestURLReference) -> Void
+  let onOpenTicket: (String) -> Void
   @Binding var contentMode: MonitoringCardContentMode
   let availableContentModes: [MonitoringCardContentMode]
 
@@ -1171,7 +1220,34 @@ private struct MonitoringCardPathRow: View {
 
       projectPathActionsMenu
 
-      if let branch = session.branchName {
+      if let linkedTicketKey {
+        SessionLinkChip(
+          title: linkedTicketKey,
+          systemImage: "ticket",
+          tint: .indigo,
+          help: "Open \(linkedTicketKey) on the Sprint board"
+        ) { onOpenTicket(linkedTicketKey) }
+      }
+
+      if let linkedPullRequest {
+        SessionLinkChip(
+          title: "Reviewing PR #\(linkedPullRequest.number) · \(linkedPullRequest.repository)",
+          systemImage: "arrow.triangle.pull",
+          tint: .blue,
+          help: "Show this pull request in Reviews (\(linkedPullRequest.url))"
+        ) { onOpenReview(linkedPullRequest) }
+
+        if let branch = session.branchName,
+          branch.caseInsensitiveCompare("main") != .orderedSame,
+          branch.caseInsensitiveCompare("master") != .orderedSame
+        {
+          Text(branch)
+            .font(.primaryCaption)
+            .foregroundStyle(Color.brandPrimary(for: providerKind))
+            .lineLimit(1)
+            .layoutPriority(1)
+        }
+      } else if let branch = session.branchName {
         Text(branch)
           .font(.primaryCaption)
           .foregroundStyle(Color.brandPrimary(for: providerKind))
@@ -1418,4 +1494,41 @@ struct AnimatedCopyButton: View {
   }
   .padding()
   .frame(width: 320)
+}
+
+// MARK: - SessionLinkChip
+
+/// Clickable chip in the session path row that jumps to the linked review or ticket.
+private struct SessionLinkChip: View {
+  let title: String
+  let systemImage: String
+  let tint: Color
+  let help: String
+  let action: () -> Void
+
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 4) {
+        Image(systemName: systemImage)
+          .font(.system(size: 9, weight: .semibold))
+        Text(title)
+          .font(.primaryCaption)
+          .lineLimit(1)
+        Image(systemName: "arrow.up.forward")
+          .font(.system(size: 8, weight: .bold))
+          .opacity(isHovered ? 1 : 0.5)
+      }
+      .foregroundStyle(tint)
+      .padding(.horizontal, 7)
+      .frame(height: 18)
+      .background(Capsule().fill(tint.opacity(isHovered ? 0.2 : 0.12)))
+      .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovered = $0 }
+    .help(help)
+    .layoutPriority(1)
+  }
 }

@@ -23,7 +23,8 @@ enum AgentHubGhosttyAppearanceConfiguration {
   ) -> String? {
     guard let bundledPath = path(isDark: isDark) else { return nil }
     guard let backdropHex = normalizedHex(backdropHex) else { return bundledPath }
-    let fileName = "appearance-\(isDark ? "dark" : "light")-\(backdropHex.dropFirst()).conf"
+    // v2: overlays gained the Cmd+1..4 unbinds; a new name skips stale cached files.
+    let fileName = "appearance-v2-\(isDark ? "dark" : "light")-\(backdropHex.dropFirst()).conf"
     let targetDirectory = directory ?? defaultOverlayDirectory
     let target = targetDirectory.appendingPathComponent(fileName)
     // Content is a pure function of the file name, so an existing file is
@@ -78,7 +79,7 @@ enum AgentHubGhosttyAppearanceConfiguration {
     directory: URL? = nil
   ) -> String? {
     guard let backdropHex = normalizedHex(backdropHex) else { return nil }
-    let fileName = "appearance-passthrough-\(backdropHex.dropFirst()).conf"
+    let fileName = "appearance-passthrough-v2-\(backdropHex.dropFirst()).conf"
     let targetDirectory = directory ?? defaultOverlayDirectory
     let target = targetDirectory.appendingPathComponent(fileName)
     if FileManager.default.fileExists(atPath: target.path) { return target.path }
@@ -89,7 +90,8 @@ enum AgentHubGhosttyAppearanceConfiguration {
       # Ghostty config/theme so the embedded terminal matches standalone
       # Ghostty, including OSC 11 background replies.
       background-opacity = 0
-      """
+
+      """ + hostKeybindOverrides
     do {
       try FileManager.default.createDirectory(
         at: targetDirectory,
@@ -101,6 +103,13 @@ enum AgentHubGhosttyAppearanceConfiguration {
       return nil
     }
   }
+
+  /// Frees Cmd+1..4 for AgentHub's workspace switcher: on macOS Ghostty binds
+  /// Cmd+1..8 to goto_tab as non-performable, so the terminal consumes them
+  /// even without Ghostty tabs. Mirrored in the bundled ghostty-*.conf files.
+  static let hostKeybindOverrides = (1...4).map { digit in
+    "keybind = super+digit_\(digit)=unbind\nkeybind = super+\(digit)=unbind"
+  }.joined(separator: "\n") + "\n"
 
   static func colorScheme(isDark: Bool) -> GhosttyColorScheme {
     isDark ? .dark : .light

@@ -142,6 +142,42 @@ struct AgentWorkflowDashboardViewModelTests {
     )
   }
 
+  @Test("A session context action can create and join a workflow atomically")
+  func createWorkflowAndMoveSessionPersists() async throws {
+    let suiteName = "AgentWorkflowDashboardViewModelTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let observations = [workflowObservation(index: 3)]
+    let viewModel = AgentWorkflowDashboardViewModel(userDefaults: defaults) {
+      observations
+    }
+    await viewModel.refreshDetectedWorkflows()
+
+    let workflowID = try #require(
+      await viewModel.createManualWorkflowAndMoveSession(
+        name: "Named workflow",
+        repositoryPath: "/repos/project-worktree",
+        branchName: "stale-branch",
+        sessionID: "claude:session-3"
+      )
+    )
+
+    #expect(viewModel.workflowID(containing: "claude:session-3") == workflowID)
+    #expect(
+      viewModel.activeWorkflowDestinations.contains {
+        $0.id == workflowID && $0.title == "Named workflow"
+      }
+    )
+    #expect(viewModel.selectedDetectedBranch?.repositoryPath == "/repos/project")
+    #expect(viewModel.selectedDetectedBranch?.branchName == "XFA-1003-batch-test")
+
+    let restoredViewModel = AgentWorkflowDashboardViewModel(userDefaults: defaults) {
+      observations
+    }
+    await restoredViewModel.refreshDetectedWorkflows()
+    #expect(restoredViewModel.workflowID(containing: "claude:session-3") == workflowID)
+  }
+
   @Test("The session library exposes unanalyzed sessions and dropping one promotes it")
   func sessionLibraryCanAssignAnUnanalyzedSession() async {
     let suiteName = "AgentWorkflowDashboardViewModelTests.\(UUID().uuidString)"
@@ -176,6 +212,86 @@ struct AgentWorkflowDashboardViewModelTests {
         .flatMap { $0.implementerSessions + $0.reviewerSessions }
         .contains { $0.id == "codex:session-0" } == true
     )
+  }
+
+  @Test("Sessions already assigned to a workflow bypass the manual analysis batch")
+  func knownWorkflowSessionsAnalyzeImmediately() async throws {
+    let suiteName = "AgentWorkflowDashboardViewModelTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let observations = (0..<25).map { workflowObservation(index: $0) }
+    let initial = AgentWorkflowDashboardViewModel(userDefaults: defaults) {
+      observations
+    }
+    await initial.refreshDetectedWorkflows()
+    let workflowID = try #require(
+      initial.createManualWorkflow(
+        name: "Known workflow",
+        repositoryPath: "/repos/project"
+      )
+    )
+    await initial.moveSession("codex:session-0", to: workflowID)
+
+    let restored = AgentWorkflowDashboardViewModel(userDefaults: defaults) {
+      observations
+    }
+    await restored.refreshDetectedWorkflows()
+
+    #expect(restored.analyzedSessionCount == 10)
+    #expect(
+      restored.sessionLibraryItems.first { $0.id == "codex:session-0" }?.isAnalyzed == true
+    )
+    #expect(restored.workflowID(containing: "codex:session-0") == workflowID)
+  }
+
+  @Test("A workflow exposes its implementation and review sessions as a comparison")
+  func workflowSessionsExposeComparison() async throws {
+    let suiteName = "AgentWorkflowDashboardViewModelTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let branchName = "XFA-8123-side-by-side"
+    let observations = [
+      AgentSessionObservation(
+        session: CLISession(
+          id: "implementation",
+          projectPath: "/repos/project",
+          branchName: branchName,
+          lastActivityAt: Date(timeIntervalSince1970: 10),
+          firstMessage: "Implement XFA-8123"
+        ),
+        provider: .codex,
+        repositoryPath: "/repos/project",
+        branchName: branchName,
+        linkedPullRequests: []
+      ),
+      AgentSessionObservation(
+        session: CLISession(
+          id: "review",
+          projectPath: "/repos/project",
+          branchName: branchName,
+          lastActivityAt: Date(timeIntervalSince1970: 20),
+          firstMessage: "Review XFA-8123 independently"
+        ),
+        provider: .claude,
+        repositoryPath: "/repos/project",
+        branchName: branchName,
+        linkedPullRequests: []
+      ),
+    ]
+    let viewModel = AgentWorkflowDashboardViewModel(userDefaults: defaults) {
+      observations
+    }
+
+    await viewModel.refreshDetectedWorkflows()
+
+    let association = try #require(
+      viewModel.workflowAssociation(for: "codex:implementation")
+    )
+    let comparison = try #require(association.comparisonRequest)
+    #expect(association.title == "XFA-8123")
+    #expect(association.role == .implementer)
+    #expect(comparison.implementation.itemID == "codex-implementation")
+    #expect(comparison.review.itemID == "claude-review")
   }
 
   @Test("All sessions in a workflow can be closed together")
@@ -237,15 +353,41 @@ struct AgentWorkflowDashboardViewModelTests {
     )
     #expect(launch?.workflowID == workflowID)
 
-    observations.append(workflowObservation(index: 2, lastActivityAt: Date()))
+    observations.append(
+      AgentSessionObservation(
+        session: CLISession(
+          id: "started-implementation",
+          projectPath: "/repos/project",
+          branchName: "main",
+          lastActivityAt: Date(),
+          firstMessage: "Review the existing behavior before changing it"
+        ),
+        provider: .codex,
+        repositoryPath: "/repos/project",
+        branchName: "main",
+        linkedPullRequests: []
+      )
+    )
     await viewModel.refreshDetectedWorkflows()
 
-    #expect(viewModel.hasSessionWorkflowOverride("codex:session-2"))
+    #expect(viewModel.hasSessionWorkflowOverride("codex:started-implementation"))
     let manualWorkflow = viewModel.displayedWorkflows.first { $0.id == workflowID }
     #expect(
       manualWorkflow?.branches
-        .flatMap { $0.implementerSessions + $0.reviewerSessions }
-        .contains { $0.id == "codex:session-2" } == true
+        .flatMap(\.implementerSessions)
+        .contains { $0.id == "codex:started-implementation" } == true
+    )
+    #expect(manualWorkflow?.branches.flatMap(\.reviewerSessions).isEmpty == true)
+
+    let restoredViewModel = AgentWorkflowDashboardViewModel(userDefaults: defaults) {
+      observations
+    }
+    await restoredViewModel.refreshDetectedWorkflows()
+    let restoredWorkflow = restoredViewModel.displayedWorkflows.first { $0.id == workflowID }
+    #expect(
+      restoredWorkflow?.branches
+        .flatMap(\.implementerSessions)
+        .contains { $0.id == "codex:started-implementation" } == true
     )
   }
 
@@ -379,7 +521,7 @@ struct AgentWorkflowDashboardViewModelTests {
         branchName: branchName,
         lastActivityAt: Date().addingTimeInterval(60),
         isActive: true,
-        firstMessage: "Review XFA-7000 independently"
+        firstMessage: launch.prompt
       ),
       provider: .claude,
       repositoryPath: "/repos/project",
@@ -395,6 +537,14 @@ struct AgentWorkflowDashboardViewModelTests {
     recorder.activityDates["claude:review-session"] = Date().addingTimeInterval(60)
 
     await viewModel.refreshDetectedWorkflows()
+
+    let detectedBranch = try #require(viewModel.detectedBranches.first)
+    #expect(detectedBranch.implementerSessions.map(\.id) == ["codex:implementation-session"])
+    #expect(detectedBranch.reviewerSessions.map(\.id) == ["claude:review-session"])
+    #expect(
+      detectedBranch.primaryReviewer?.roleReason
+        == "Started by AgentHub as the independent reviewer"
+    )
 
     let handoff = try #require(recorder.sentPrompts.first)
     #expect(handoff.assignmentID == "codex:implementation-session")

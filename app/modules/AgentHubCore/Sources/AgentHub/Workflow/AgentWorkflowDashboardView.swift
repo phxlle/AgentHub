@@ -4,14 +4,14 @@ import AppKit
 import SwiftUI
 
 public struct AgentWorkflowDashboardView: View {
+  @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.runtimeTheme) private var runtimeTheme
   @Bindable private var viewModel: AgentWorkflowDashboardViewModel
   private let onOpenSession: ((DetectedAgentSession) -> Void)?
   private let onCloseSession: ((DetectedAgentSession) -> Void)?
-  private let onStartSession: ((String, SessionProviderKind) -> Void)?
+  private let onStartSession: ((String, SessionProviderKind, String?) -> Void)?
+  private let onCompareSessions: ((WorkflowSessionComparisonRequest) -> Void)?
   @State private var isCreatingWorkflow = false
-  @State private var newWorkflowName = ""
-  @State private var newWorkflowRepositoryPath = ""
-  @State private var newWorkflowBranchName = ""
   @State private var sessionSearchText = ""
 
   public init(viewModel: AgentWorkflowDashboardViewModel) {
@@ -19,18 +19,21 @@ public struct AgentWorkflowDashboardView: View {
     onOpenSession = nil
     onCloseSession = nil
     onStartSession = nil
+    onCompareSessions = nil
   }
 
   init(
     viewModel: AgentWorkflowDashboardViewModel,
     onOpenSession: @escaping (DetectedAgentSession) -> Void,
     onCloseSession: @escaping (DetectedAgentSession) -> Void,
-    onStartSession: @escaping (String, SessionProviderKind) -> Void
+    onStartSession: @escaping (String, SessionProviderKind, String?) -> Void,
+    onCompareSessions: @escaping (WorkflowSessionComparisonRequest) -> Void
   ) {
     self.viewModel = viewModel
     self.onOpenSession = onOpenSession
     self.onCloseSession = onCloseSession
     self.onStartSession = onStartSession
+    self.onCompareSessions = onCompareSessions
   }
 
   public var body: some View {
@@ -44,11 +47,19 @@ public struct AgentWorkflowDashboardView: View {
       sessionColumn
     }
     .navigationSplitViewStyle(.balanced)
+    .tint(Color.brandPrimary(from: runtimeTheme))
+    .background(workspaceBackground.ignoresSafeArea())
     .task {
       await viewModel.load()
     }
     .task(id: viewModel.sessionRevision) {
       await viewModel.refreshDetectedWorkflows()
+    }
+    .sheet(isPresented: $isCreatingWorkflow) {
+      CreateManualWorkflowSheet(
+        onCreate: createManualWorkflow,
+        onDismiss: { isCreatingWorkflow = false }
+      )
     }
   }
 
@@ -63,7 +74,7 @@ public struct AgentWorkflowDashboardView: View {
           .frame(minHeight: 220, idealHeight: 340)
       }
     }
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background(panelBackground)
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Detected ticket workflows")
   }
@@ -86,11 +97,8 @@ public struct AgentWorkflowDashboardView: View {
           Image(systemName: "plus")
         }
         .buttonStyle(.plain)
-        .help("Create an empty workflow")
+        .help("Create a workflow and start its implementation agent")
         .accessibilityLabel("Create workflow")
-        .popover(isPresented: $isCreatingWorkflow, arrowEdge: .bottom) {
-          manualWorkflowCreationPopover
-        }
         Button {
           Task { await viewModel.refreshDetectedWorkflows(forcePullRequestRefresh: true) }
         } label: {
@@ -136,68 +144,19 @@ public struct AgentWorkflowDashboardView: View {
     .padding(DesignTokens.Spacing.md)
   }
 
-  private var manualWorkflowCreationPopover: some View {
-    VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
-      VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-        Text("New workflow")
-          .font(.primaryDefault)
-        Text("Create it now, then add or start a session when you are ready.")
-          .font(.secondarySmall)
-          .foregroundStyle(.secondary)
-      }
-
-      TextField("Workflow name or ticket", text: $newWorkflowName)
-      HStack(spacing: DesignTokens.Spacing.sm) {
-        TextField("Repository path", text: $newWorkflowRepositoryPath)
-        Button("Choose…", action: chooseWorkflowRepository)
-          .controlSize(.small)
-      }
-      TextField("Branch (optional)", text: $newWorkflowBranchName)
-
-      HStack {
-        Spacer()
-        Button("Cancel") {
-          isCreatingWorkflow = false
-        }
-        .keyboardShortcut(.cancelAction)
-        Button("Create") {
-          createManualWorkflow()
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(
-          newWorkflowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || newWorkflowRepositoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        )
-      }
-    }
-    .padding(DesignTokens.Spacing.lg)
-    .frame(width: 390)
-  }
-
-  private func chooseWorkflowRepository() {
-    let panel = NSOpenPanel()
-    panel.canChooseFiles = false
-    panel.canChooseDirectories = true
-    panel.allowsMultipleSelection = false
-    panel.prompt = "Choose Repository"
-    guard panel.runModal() == .OK, let url = panel.url else { return }
-    newWorkflowRepositoryPath = url.path
-  }
-
-  private func createManualWorkflow() {
+  private func createManualWorkflow(_ request: ManualWorkflowCreationRequest) -> Bool {
     guard
-      viewModel.createManualWorkflow(
-        name: newWorkflowName,
-        repositoryPath: newWorkflowRepositoryPath,
-        branchName: newWorkflowBranchName
-      ) != nil
+      let workflowID = viewModel.createManualWorkflow(
+        name: request.name,
+        repositoryPath: request.repositoryPath,
+        branchName: request.branchName
+      )
     else {
-      return
+      return false
     }
-    newWorkflowName = ""
-    newWorkflowRepositoryPath = ""
-    newWorkflowBranchName = ""
+    onStartSession?(workflowID, request.provider, request.prompt)
     isCreatingWorkflow = false
+    return true
   }
 
   private var sessionAnalysisControls: some View {
@@ -278,6 +237,8 @@ public struct AgentWorkflowDashboardView: View {
         }
       }
       .listStyle(.sidebar)
+      .scrollContentBackground(.hidden)
+      .background(panelBackground)
       .accessibilityLabel("Ticket workflow list")
     }
   }
@@ -308,7 +269,10 @@ public struct AgentWorkflowDashboardView: View {
         }
         .padding(.horizontal, DesignTokens.Spacing.sm)
         .frame(height: 28)
-        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+        .background(
+          Color.themedControlBackground(theme: runtimeTheme),
+          in: RoundedRectangle(cornerRadius: 6)
+        )
       }
       .padding(DesignTokens.Spacing.md)
 
@@ -329,20 +293,26 @@ public struct AgentWorkflowDashboardView: View {
         }
       } else {
         List(filteredSessionLibraryItems) { item in
-          WorkflowSessionLibraryRow(item: item, onOpenSession: onOpenSession)
-            .draggable(item.id) {
-              Label(
-                "\(item.assignment.provider.rawValue) · \(item.assignment.session.displayName)",
-                systemImage: "terminal"
-              )
-              .padding(DesignTokens.Spacing.sm)
-            }
+          WorkflowSessionLibraryRow(
+            item: item,
+            displayName: viewModel.displayName(for: item.assignment),
+            onOpenSession: onOpenSession
+          )
+          .draggable(item.id) {
+            Label(
+              "\(item.assignment.provider.rawValue) · \(viewModel.displayName(for: item.assignment))",
+              systemImage: "terminal"
+            )
+            .padding(DesignTokens.Spacing.sm)
+          }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(panelBackground)
         .accessibilityLabel("Local session library")
       }
     }
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background(panelBackground)
   }
 
   private var filteredSessionLibraryItems: [WorkflowSessionLibraryItem] {
@@ -352,6 +322,7 @@ public struct AgentWorkflowDashboardView: View {
       let session = item.assignment.session
       return [
         item.assignment.provider.rawValue,
+        viewModel.displayName(for: item.assignment),
         session.displayName,
         session.firstMessage,
         session.branchName,
@@ -412,6 +383,8 @@ public struct AgentWorkflowDashboardView: View {
           }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .background(workspaceBackground)
         .accessibilityLabel("Branches for \(workflow.ticketKey ?? "unassigned sessions")")
       }
     } else {
@@ -428,6 +401,14 @@ public struct AgentWorkflowDashboardView: View {
       get: { viewModel.selectedDetectedBranchID },
       set: { viewModel.selectDetectedBranch($0) }
     )
+  }
+
+  private var workspaceBackground: Color {
+    Color.adaptiveBackground(for: colorScheme, theme: runtimeTheme)
+  }
+
+  private var panelBackground: Color {
+    Color.themedPanelBackground(for: colorScheme, theme: runtimeTheme)
   }
 
   @ViewBuilder
@@ -453,6 +434,7 @@ public struct AgentWorkflowDashboardView: View {
         hasSessionOverride: { assignment in
           viewModel.hasSessionWorkflowOverride(assignment.id)
         },
+        sessionDisplayName: viewModel.displayName(for:),
         onMoveSession: { sessionID in
           Task { await viewModel.moveSession(sessionID, to: workflow.id) }
         },
@@ -468,7 +450,9 @@ public struct AgentWorkflowDashboardView: View {
             onCloseSession?(assignment)
           }
         },
-        onStartSession: onStartSession
+        onStartSession: onStartSession,
+        comparisonRequest: viewModel.comparisonRequest(for: branch.id),
+        onCompareSessions: onCompareSessions
       )
     } else {
       ContentUnavailableView {
@@ -482,6 +466,7 @@ public struct AgentWorkflowDashboardView: View {
 
 private struct WorkflowSessionLibraryRow: View {
   let item: WorkflowSessionLibraryItem
+  let displayName: String
   let onOpenSession: ((DetectedAgentSession) -> Void)?
 
   var body: some View {
@@ -530,12 +515,15 @@ private struct WorkflowSessionLibraryRow: View {
   }
 
   private var sessionTitle: String {
+    if displayName != item.assignment.session.displayName {
+      return displayName
+    }
     let message = item.assignment.session.firstMessage?
       .trimmingCharacters(in: .whitespacesAndNewlines)
     if let message, !message.isEmpty {
       return message
     }
-    return item.assignment.session.displayName
+    return displayName
   }
 }
 
@@ -711,11 +699,14 @@ private struct DetectedBranchSessionDetail: View {
   let onCloseSession: (DetectedAgentSession) -> Void
   let onRemoveSessionOverride: (DetectedAgentSession) -> Void
   let hasSessionOverride: (DetectedAgentSession) -> Bool
+  let sessionDisplayName: (DetectedAgentSession) -> String
   let onMoveSession: (String) -> Void
   let onRetryReview: () -> Void
   let onCreateReviewAgent: () -> Void
   let onCloseAllSessions: () -> Void
-  let onStartSession: ((String, SessionProviderKind) -> Void)?
+  let onStartSession: ((String, SessionProviderKind, String?) -> Void)?
+  let comparisonRequest: WorkflowSessionComparisonRequest?
+  let onCompareSessions: ((WorkflowSessionComparisonRequest) -> Void)?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -771,7 +762,8 @@ private struct DetectedBranchSessionDetail: View {
               onOpenSession: onOpenSession,
               onCloseSession: onCloseSession,
               onRemoveSessionOverride: onRemoveSessionOverride,
-              hasSessionOverride: hasSessionOverride
+              hasSessionOverride: hasSessionOverride,
+              sessionDisplayName: sessionDisplayName
             )
           } else {
             RoleSessionSection(
@@ -782,7 +774,8 @@ private struct DetectedBranchSessionDetail: View {
               onOpenSession: onOpenSession,
               onCloseSession: onCloseSession,
               onRemoveSessionOverride: onRemoveSessionOverride,
-              hasSessionOverride: hasSessionOverride
+              hasSessionOverride: hasSessionOverride,
+              sessionDisplayName: sessionDisplayName
             )
 
             Divider()
@@ -799,7 +792,8 @@ private struct DetectedBranchSessionDetail: View {
               onOpenSession: onOpenSession,
               onCloseSession: onCloseSession,
               onRemoveSessionOverride: onRemoveSessionOverride,
-              hasSessionOverride: hasSessionOverride
+              hasSessionOverride: hasSessionOverride,
+              sessionDisplayName: sessionDisplayName
             )
           }
         }
@@ -856,6 +850,13 @@ private struct DetectedBranchSessionDetail: View {
         .controlSize(.small)
         .disabled(workflowSessionCount == 0)
         .help("Close every implementation and review session in this workflow")
+      if let comparisonRequest, let onCompareSessions {
+        Button("Side by side", systemImage: "rectangle.split.2x1") {
+          onCompareSessions(comparisonRequest)
+        }
+        .controlSize(.small)
+        .help("Open the implementation and review sessions next to each other")
+      }
       if let automation = branch.automatedReview {
         Label(automation.phase.displayName, systemImage: automation.phase.systemImage)
           .font(.secondaryCaption)
@@ -868,10 +869,10 @@ private struct DetectedBranchSessionDetail: View {
       if branch.manualWorkflowID != nil, !branch.isCompleted, let onStartSession {
         Menu {
           Button("Codex") {
-            onStartSession(workflowID, .codex)
+            onStartSession(workflowID, .codex, nil)
           }
           Button("Claude") {
-            onStartSession(workflowID, .claude)
+            onStartSession(workflowID, .claude, nil)
           }
         } label: {
           Label("Start session", systemImage: "plus")
@@ -905,6 +906,7 @@ private struct RoleSessionSection: View {
   let onCloseSession: (DetectedAgentSession) -> Void
   let onRemoveSessionOverride: (DetectedAgentSession) -> Void
   let hasSessionOverride: (DetectedAgentSession) -> Bool
+  let sessionDisplayName: (DetectedAgentSession) -> String
 
   var body: some View {
     VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
@@ -936,7 +938,8 @@ private struct RoleSessionSection: View {
             onOpenSession: onOpenSession,
             onCloseSession: onCloseSession,
             onRemoveSessionOverride: onRemoveSessionOverride,
-            hasSessionOverride: hasSessionOverride
+            hasSessionOverride: hasSessionOverride,
+            displayName: sessionDisplayName(assignment)
           )
         }
       }
@@ -951,6 +954,7 @@ private struct DetectedAgentSessionRow: View {
   let onCloseSession: (DetectedAgentSession) -> Void
   let onRemoveSessionOverride: (DetectedAgentSession) -> Void
   let hasSessionOverride: (DetectedAgentSession) -> Bool
+  let displayName: String
 
   var body: some View {
     HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
@@ -958,7 +962,7 @@ private struct DetectedAgentSessionRow: View {
         HStack(spacing: DesignTokens.Spacing.sm) {
           Text(assignment.provider.rawValue)
             .font(.secondarySmall)
-          Text(assignment.session.displayName)
+          Text(displayName)
             .font(.jetBrainsMono(size: 10))
             .foregroundStyle(.secondary)
           if assignment.session.isActive {
@@ -1019,7 +1023,7 @@ private struct DetectedAgentSessionRow: View {
     .accessibilityElement(children: .contain)
     .draggable(assignment.id) {
       Label(
-        "\(assignment.provider.rawValue) · \(assignment.session.displayName)",
+        "\(assignment.provider.rawValue) · \(displayName)",
         systemImage: assignment.role == .reviewer ? "doc.text.magnifyingglass" : "hammer"
       )
       .padding(DesignTokens.Spacing.sm)
@@ -1027,9 +1031,162 @@ private struct DetectedAgentSessionRow: View {
   }
 }
 
+private struct ManualWorkflowCreationRequest {
+  let name: String
+  let repositoryPath: String
+  let branchName: String?
+  let provider: SessionProviderKind
+  let prompt: String
+}
+
+private struct CreateManualWorkflowSheet: View {
+  let onCreate: (ManualWorkflowCreationRequest) -> Bool
+  let onDismiss: () -> Void
+
+  @State private var name = ""
+  @State private var repositoryPath = ""
+  @State private var branchName = ""
+  @State private var provider = SessionProviderKind.codex
+  @State private var prompt = ""
+  @FocusState private var focusedField: Field?
+
+  private enum Field {
+    case name
+    case prompt
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
+      VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+        Label("New Workflow", systemImage: "rectangle.stack.badge.plus")
+          .font(.headline)
+        Text("Create the workflow and start its implementation agent immediately.")
+          .font(.secondarySmall)
+          .foregroundStyle(.secondary)
+      }
+
+      Grid(alignment: .leading, horizontalSpacing: DesignTokens.Spacing.md, verticalSpacing: 10) {
+        GridRow {
+          fieldLabel("Title")
+          TextField("Workflow name or Jira ticket", text: $name)
+            .textFieldStyle(.roundedBorder)
+            .focused($focusedField, equals: .name)
+        }
+
+        GridRow {
+          fieldLabel("Repository")
+          HStack(spacing: DesignTokens.Spacing.sm) {
+            TextField("Repository or worktree path", text: $repositoryPath)
+              .textFieldStyle(.roundedBorder)
+            Button("Choose…", action: chooseRepository)
+              .controlSize(.small)
+          }
+        }
+
+        GridRow {
+          fieldLabel("Branch")
+          TextField("Optional", text: $branchName)
+            .textFieldStyle(.roundedBorder)
+        }
+
+        GridRow {
+          fieldLabel("Implementer")
+          Picker("Implementation agent", selection: $provider) {
+            Text("Codex").tag(SessionProviderKind.codex)
+            Text("Claude").tag(SessionProviderKind.claude)
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          .frame(maxWidth: 240)
+        }
+      }
+
+      VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+        Text("Implementation prompt")
+          .font(.secondarySmall)
+        TextField(
+          "Describe what the implementation agent should build, change, or investigate.",
+          text: $prompt,
+          axis: .vertical
+        )
+        .textFieldStyle(.roundedBorder)
+        .lineLimit(6...10)
+        .focused($focusedField, equals: .prompt)
+      }
+
+      HStack(spacing: DesignTokens.Spacing.sm) {
+        Label(
+          "The new session is linked as the implementation agent.",
+          systemImage: "hammer"
+        )
+        .font(.secondaryCaption)
+        .foregroundStyle(.secondary)
+
+        Spacer()
+
+        Button("Cancel", action: onDismiss)
+          .keyboardShortcut(.cancelAction)
+        Button("Create & Start", action: create)
+          .keyboardShortcut(.defaultAction)
+          .disabled(!canCreate)
+      }
+    }
+    .padding(DesignTokens.Spacing.xl)
+    .frame(width: 580)
+    .onAppear { focusedField = .name }
+  }
+
+  private func fieldLabel(_ title: String) -> some View {
+    Text(title)
+      .font(.secondarySmall)
+      .frame(width: 82, alignment: .trailing)
+  }
+
+  private var trimmedName: String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var trimmedRepositoryPath: String {
+    repositoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var trimmedPrompt: String {
+    prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var canCreate: Bool {
+    !trimmedName.isEmpty && !trimmedRepositoryPath.isEmpty && !trimmedPrompt.isEmpty
+  }
+
+  private func chooseRepository() {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.allowsMultipleSelection = false
+    panel.prompt = "Choose Repository"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    repositoryPath = url.path
+  }
+
+  private func create() {
+    guard canCreate else { return }
+    let trimmedBranch = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
+    let request = ManualWorkflowCreationRequest(
+      name: trimmedName,
+      repositoryPath: trimmedRepositoryPath,
+      branchName: trimmedBranch.isEmpty ? nil : trimmedBranch,
+      provider: provider,
+      prompt: trimmedPrompt
+    )
+    if onCreate(request) {
+      onDismiss()
+    }
+  }
+}
+
 private struct ManualWorkflowEmptyState: View {
   let workflowID: String
-  let onStartSession: ((String, SessionProviderKind) -> Void)?
+  let onStartSession: ((String, SessionProviderKind, String?) -> Void)?
 
   var body: some View {
     VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
@@ -1041,10 +1198,10 @@ private struct ManualWorkflowEmptyState: View {
       if let onStartSession {
         HStack(spacing: DesignTokens.Spacing.sm) {
           Button("Start Codex") {
-            onStartSession(workflowID, .codex)
+            onStartSession(workflowID, .codex, nil)
           }
           Button("Start Claude") {
-            onStartSession(workflowID, .claude)
+            onStartSession(workflowID, .claude, nil)
           }
         }
         .buttonStyle(.bordered)

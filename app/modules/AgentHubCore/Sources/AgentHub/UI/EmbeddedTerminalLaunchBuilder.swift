@@ -34,11 +34,14 @@ public struct EmbeddedTerminalLaunch {
 
 public enum EmbeddedTerminalLaunchError: LocalizedError, Equatable {
   case executableNotFound(String)
+  case mcpConfigurationWriteFailed(String)
 
   public var errorDescription: String? {
     switch self {
     case .executableNotFound(let command):
       return "Could not find '\(command)' command."
+    case .mcpConfigurationWriteFailed(let message):
+      return "Could not prepare Claude MCP configuration: \(message)"
     }
   }
 }
@@ -90,6 +93,7 @@ public enum EmbeddedTerminalLaunchBuilder {
     agentHubCLIPath: String? = nil,
     installAgentHubWorktreeSkill: () -> Void,
     removeLegacyAgentHubSessionNamingSkill: () -> Void = {},
+    claudeMCPConfigDirectory: URL? = nil,
     xcodeBuildMCPEnabled: Bool = XcodeBuildMCPPreflight.isEnabled(),
     studioGuidanceEnabled: Bool = StudioAgentGuidance.isEnabled(),
     codexGlobalApprovalPolicy: String? = CodexGlobalConfigReader.approvalPolicy(),
@@ -176,7 +180,7 @@ public enum EmbeddedTerminalLaunchBuilder {
       studioGuidance: studioGuidance,
       launchContext: resolvedLaunchContext
     )
-    let args = cliConfiguration.argumentsForSession(
+    var args = cliConfiguration.argumentsForSession(
       sessionId: sessionId,
       prompt: initialPrompt,
       agentHubMCPServerPath: resolvedAgentHubCLIPath,
@@ -202,6 +206,16 @@ public enum EmbeddedTerminalLaunchBuilder {
       xcodeBuildMCPBootstrap: xcodeBuildMCPBootstrap,
       appendSystemPrompt: appendSystemPrompt
     )
+    if cliConfiguration.mode == .claude {
+      do {
+        args = try ClaudeMCPConfigurationMaterializer.materialize(
+          arguments: args,
+          directory: claudeMCPConfigDirectory
+        )
+      } catch {
+        return .failure(.mcpConfigurationWriteFailed(error.localizedDescription))
+      }
+    }
     let joinedArgs = args
       .map { "'\(shellEscape($0))'" }
       .joined(separator: " ")

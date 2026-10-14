@@ -110,6 +110,86 @@ struct AgentWorkspaceSessionCoordinatorTests {
     #expect(store.getWorkspaceStateSync(for: .claude).monitoredSessionIds == [session.id])
   }
 
+  @Test("Undoing an archive resumes monitoring and restores the pin")
+  func undoArchiveRestoresMonitoringAndPin() async throws {
+    let store = try SessionMetadataStore(path: temporaryCoordinatorDatabasePath())
+    let session = workspaceSession(provider: .claude)
+    let viewModel = makeCoordinatorViewModel(
+      provider: .claude,
+      monitor: WorkspaceCoordinatorMonitorSpy(sessionsByID: [session.id: session]),
+      watcher: WorkspaceCoordinatorWatcherSpy(),
+      store: store
+    )
+    await waitForCoordinatorCondition { viewModel.hasReadPersistedWorkspaceState }
+    viewModel.startMonitoring(session: session)
+    viewModel.togglePin(for: session)
+    #expect(viewModel.pinnedSessionIds.contains(session.id))
+
+    viewModel.stopMonitoring(session: session)
+    #expect(!viewModel.isMonitoring(sessionId: session.id))
+    #expect(!viewModel.pinnedSessionIds.contains(session.id))
+
+    viewModel.restoreArchivedSession(session, wasPinned: true)
+    #expect(viewModel.isMonitoring(sessionId: session.id))
+    #expect(viewModel.pinnedSessionIds.contains(session.id))
+    #expect(viewModel.archivedSessionIds.isEmpty)
+    await waitForCoordinatorCondition {
+      let state = store.getWorkspaceStateSync(for: .claude)
+      return state.monitoredSessionIds == [session.id] && state.archivedSessionIds.isEmpty
+    }
+  }
+
+  @Test("Archived sessions stay closed when a workspace link is restored")
+  func archivedSessionIgnoresWorkspaceRestore() async throws {
+    let store = try SessionMetadataStore(path: temporaryCoordinatorDatabasePath())
+    let session = workspaceSession(provider: .claude)
+    let monitor = WorkspaceCoordinatorMonitorSpy(sessionsByID: [session.id: session])
+    let viewModel = makeCoordinatorViewModel(
+      provider: .claude,
+      monitor: monitor,
+      watcher: WorkspaceCoordinatorWatcherSpy(),
+      store: store
+    )
+    let coordinator = AgentWorkspaceSessionCoordinator(
+      claudeViewModel: viewModel,
+      codexViewModel: makeCoordinatorViewModel(
+        provider: .codex,
+        monitor: WorkspaceCoordinatorMonitorSpy(),
+        watcher: WorkspaceCoordinatorWatcherSpy(),
+        store: store
+      )
+    )
+    let reference = AgentWorkspaceSessionReference(
+      provider: .claude,
+      sessionId: session.id,
+      projectPath: session.projectPath
+    )
+
+    // Saves stay gated until the launch read finishes; archive only after that.
+    await waitForCoordinatorCondition { viewModel.hasReadPersistedWorkspaceState }
+    viewModel.startMonitoring(session: session)
+    viewModel.stopMonitoring(session: session)
+
+    await waitForCoordinatorCondition {
+      let state = store.getWorkspaceStateSync(for: .claude)
+      return state.monitoredSessionIds.isEmpty
+        && state.archivedSessionIds == [session.id]
+    }
+
+    await coordinator.restorePersistedSessions([reference])
+
+    #expect(!viewModel.isMonitoring(sessionId: session.id))
+    #expect(viewModel.archivedSessionIds == [session.id])
+    #expect(await monitor.loadedSessionRequests().isEmpty)
+
+    viewModel.startMonitoring(session: session)
+    await waitForCoordinatorCondition {
+      let state = store.getWorkspaceStateSync(for: .claude)
+      return state.monitoredSessionIds == [session.id]
+        && state.archivedSessionIds.isEmpty
+    }
+  }
+
   @Test("Persisted workspace references are visible while session files are loading")
   func persistedReferenceIsVisibleDuringTargetedLoad() async throws {
     let store = try SessionMetadataStore(path: temporaryCoordinatorDatabasePath())
@@ -297,7 +377,9 @@ private actor WorkspaceCoordinatorMonitorSpy: SessionMonitorServiceProtocol {
 }
 
 private actor WorkspaceCoordinatorWatcherSpy: SessionFileWatcherProtocol {
-  nonisolated(unsafe) private let subject = PassthroughSubject<SessionFileWatcher.StateUpdate, Never>()
+  nonisolated(unsafe) private let subject = PassthroughSubject<
+    SessionFileWatcher.StateUpdate, Never
+  >()
 
   nonisolated var statePublisher: AnyPublisher<SessionFileWatcher.StateUpdate, Never> {
     subject.eraseToAnyPublisher()

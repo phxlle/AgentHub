@@ -37,6 +37,34 @@ enum SidebarSessionNavigationDirection {
   case backward
 }
 
+enum SidebarSessionAttention: Int, Equatable {
+  case approvalRequired
+  case inputRequired
+
+  init?(status: SessionStatus?) {
+    switch status {
+    case .awaitingApproval(let tool):
+      self = SessionInteractiveInputTool.matches(tool) ? .inputRequired : .approvalRequired
+    case .thinking, .executingTool, .waitingForUser, .idle, .none:
+      return nil
+    }
+  }
+
+  var displayName: String {
+    switch self {
+    case .approvalRequired: return "Approval needed"
+    case .inputRequired: return "Input needed"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .approvalRequired: return "hand.raised.fill"
+    case .inputRequired: return "bubble.left.fill"
+    }
+  }
+}
+
 struct SidebarSessionGroup<Item>: Identifiable {
   let id: String
   let displayName: String
@@ -62,7 +90,51 @@ struct SidebarRepositoryModuleSection<Item>: Identifiable {
   }
 }
 
+struct SidebarSessionComparison<Item> {
+  let implementation: Item
+  let review: Item
+}
+
 enum SidebarSessionOrdering {
+  static func requiresAttention(_ status: SessionStatus?) -> Bool {
+    SidebarSessionAttention(status: status) != nil
+  }
+
+  static func attentionItems<Item>(
+    from items: [Item],
+    status: (Item) -> SessionStatus?,
+    timestamp: (Item) -> Date,
+    id: (Item) -> String
+  ) -> [Item] {
+    items
+      .filter { requiresAttention(status($0)) }
+      .sorted { lhs, rhs in
+        let lhsAttention = SidebarSessionAttention(status: status(lhs))
+        let rhsAttention = SidebarSessionAttention(status: status(rhs))
+        if lhsAttention != rhsAttention {
+          return (lhsAttention?.rawValue ?? .max) < (rhsAttention?.rawValue ?? .max)
+        }
+        return orderedByActivity(lhs, rhs, timestamp: timestamp, id: id)
+      }
+  }
+
+  static func comparisonItems<Item>(
+    from items: [Item],
+    implementationID: String,
+    reviewID: String,
+    id: (Item) -> String
+  ) -> SidebarSessionComparison<Item>? {
+    guard implementationID != reviewID,
+      let implementation = items.first(where: { id($0) == implementationID }),
+      let review = items.first(where: { id($0) == reviewID })
+    else { return nil }
+
+    return SidebarSessionComparison(
+      implementation: implementation,
+      review: review
+    )
+  }
+
   /// The pinned section, in the order the user sees it.
   ///
   /// Pinned rows are the only ones the user can drag, so they are the only ones
@@ -262,6 +334,7 @@ enum SidebarSessionOrdering {
     worktreeDisplayMode: WorktreeDisplayMode,
     collapsedProjectGroups: Set<String>,
     collapsedStatusGroups: Set<StatusGroupCategory>,
+    isAttentionSectionCollapsed: Bool,
     isPinnedSectionCollapsed: Bool,
     isPinned: (Item) -> Bool,
     projectPath: (Item) -> String,
@@ -271,11 +344,23 @@ enum SidebarSessionOrdering {
     manualOrder: (Item) -> Int? = { _ in nil }
   ) -> [Item] {
     var result: [Item] = []
+    let attentionItems = attentionItems(
+      from: items,
+      status: status,
+      timestamp: timestamp,
+      id: id
+    )
+    let attentionIDs = Set(attentionItems.map(id))
+    let ordinaryItems = items.filter { !attentionIDs.contains(id($0)) }
+
+    if !isAttentionSectionCollapsed {
+      result.append(contentsOf: attentionItems)
+    }
 
     if !isPinnedSectionCollapsed {
       result.append(
         contentsOf: pinnedItems(
-          from: items,
+          from: ordinaryItems,
           isPinned: isPinned,
           timestamp: timestamp,
           id: id,
@@ -286,7 +371,7 @@ enum SidebarSessionOrdering {
     switch groupMode {
     case .repo:
       let groups = moduleGroups(
-        from: items,
+        from: ordinaryItems,
         repositories: repositories,
         worktreeDisplayMode: worktreeDisplayMode,
         isPinned: isPinned,
@@ -301,7 +386,7 @@ enum SidebarSessionOrdering {
 
     case .status:
       let groups = statusGroups(
-        from: items,
+        from: ordinaryItems,
         isPinned: isPinned,
         status: status,
         timestamp: timestamp,
@@ -359,9 +444,9 @@ enum SidebarSessionOrdering {
     let newIndex: Int
     switch direction {
     case .forward:
-      newIndex = min(currentIndex + 1, orderedIDs.count - 1)
+      newIndex = (currentIndex + 1) % orderedIDs.count
     case .backward:
-      newIndex = max(currentIndex - 1, 0)
+      newIndex = (currentIndex - 1 + orderedIDs.count) % orderedIDs.count
     }
     return orderedIDs[newIndex]
   }

@@ -174,6 +174,10 @@ public final class CLISessionsViewModel {
   /// cannot permanently forget a monitored session.
   private var unrestoredSessionIds: Set<String> = []
 
+  /// Session IDs the user explicitly archived. These tombstones prevent durable
+  /// workflow and review links from silently restoring a closed session.
+  public private(set) var archivedSessionIds: Set<String> = []
+
   /// Maps session IDs to prompts that should be sent to the terminal when it becomes ready.
   ///
   /// This acts as a bridge between GitDiffView (where users submit inline edit requests) and
@@ -1048,12 +1052,10 @@ public final class CLISessionsViewModel {
 
     func transferred(toSessionId sessionId: String) -> TerminalSurfaceDescriptor {
       switch self {
-      case .cli(
+      case let .cli(
         _,
-        let
-          projectPath,
-        let
-          cliConfiguration,
+        projectPath,
+        cliConfiguration,
         _,
         _,
         _,
@@ -2003,6 +2005,7 @@ public final class CLISessionsViewModel {
     // Set loading state synchronously so the UI never shows empty state during restoration
     let persistedWorkspaceState = metadataStore?.getWorkspaceStateSync(for: providerKind)
     selectedFolderPaths = persistedWorkspaceState?.selectedFolderPaths ?? []
+    archivedSessionIds = Set(persistedWorkspaceState?.archivedSessionIds ?? [])
     if persistedWorkspaceState?.selectedRepositoryPaths.isEmpty == false
       || persistedWorkspaceState?.selectedFolderPaths.isEmpty == false
     {
@@ -2410,7 +2413,14 @@ public final class CLISessionsViewModel {
     guard let store = metadataStore else { return }
 
     Task {
-      let sessionIds = Array(monitoredSessionIds)
+      let sessionIds = Array(
+        monitoredSessionIds.union(
+          selectedRepositories
+            .flatMap(\.worktrees)
+            .flatMap(\.sessions)
+            .map(\.id)
+        )
+      )
       guard !sessionIds.isEmpty else { return }
 
       do {
@@ -2680,6 +2690,8 @@ public final class CLISessionsViewModel {
   /// must never be treated as "empty" and then written back over the user's
   /// real tracked projects and monitored sessions.
   @ObservationIgnored private var canPersistWorkspaceState = false
+  /// Test seam: true once the launch read succeeded and saves are allowed.
+  var hasReadPersistedWorkspaceState: Bool { canPersistWorkspaceState }
   /// Test seam: lets unit tests simulate a failing workspace-state read.
   @ObservationIgnored var workspaceStateReadOverride: ((SessionProviderKind) throws -> SessionWorkspaceState)?
 
@@ -2715,7 +2727,9 @@ public final class CLISessionsViewModel {
       // Retain every saved session ID before any restore step can fail. Even if
       // repositories or worktrees are unavailable this launch, the IDs keep
       // riding along in workspace-state writes and retry on the next launch.
-      unrestoredSessionIds.formUnion(workspaceState.monitoredSessionIds)
+      let persistedSessionIds = Set(workspaceState.monitoredSessionIds)
+        .subtracting(archivedSessionIds)
+      unrestoredSessionIds.formUnion(persistedSessionIds)
       guard !paths.isEmpty else {
         return
       }
@@ -2725,12 +2739,13 @@ public final class CLISessionsViewModel {
       pendingLaunchRestoreRepositoryHookSyncSkip = nil
 
       // Store persisted session IDs for progressive restoration
-      let persistedSessionIds = Set(workspaceState.monitoredSessionIds)
       // Pinned sessions are durable anchors: attempt to restore them even when
       // a past sweep or failed launch dropped them from the persisted monitored
       // set. IDs that fail to load (other provider, transcript deleted) stay
       // out of the persisted set and are retried on a future launch.
-      let sessionIdsToRestore = persistedSessionIds.union(pinnedSessionIds)
+      let sessionIdsToRestore = persistedSessionIds.union(
+        pinnedSessionIds.subtracting(archivedSessionIds)
+      )
       if !persistedSessionIds.isEmpty {
         pendingRestorationSessionIds = persistedSessionIds
       }
@@ -2855,6 +2870,7 @@ public final class CLISessionsViewModel {
   private func restoreLoadedMonitoredSessions(
     _ sessions: [CLISession], allowedProjectRoots: [String]
   ) {
+    let sessions = sessions.filter { !archivedSessionIds.contains($0.id) }
     guard !sessions.isEmpty else { return }
 
     // Pinned sessions restore even when their project directory vanished
@@ -2933,6 +2949,8 @@ public final class CLISessionsViewModel {
   /// Called each time selectedRepositories is updated. Populates monitoring state directly
   /// (skips persistMonitoredSessions to avoid overwriting the complete persisted state).
   private func processPendingSessionRestorations() {
+    pendingRestorationSessionIds.subtract(archivedSessionIds)
+    unrestoredSessionIds.subtract(archivedSessionIds)
     guard !pendingRestorationSessionIds.isEmpty else { return }
 
     var restoredIds: Set<String> = []
@@ -2992,11 +3010,13 @@ public final class CLISessionsViewModel {
       monitoredSessionIds
       .union(pendingRestorationSessionIds)
       .union(unrestoredSessionIds)
+      .subtracting(archivedSessionIds)
 
     return SessionWorkspaceState(
       selectedRepositoryPaths: selectedRepositories.map(\.path),
       selectedFolderPaths: selectedFolderPaths,
       monitoredSessionIds: Array(sessionIdsToPersist).sorted(),
+      archivedSessionIds: Array(archivedSessionIds).sorted(),
       ownedWorktreePaths: Array(ownedWorktreePaths).sorted(),
       expansionState: state
     )
@@ -3055,7 +3075,13 @@ public final class CLISessionsViewModel {
   /// Reconciles workspace-owned session IDs with the normal provider launch
   /// restoration flow without mounting any terminal surfaces.
   func restoreWorkspaceSessions(_ references: [AgentWorkspaceSessionReference]) async {
-    let references = Array(Set(references.filter { $0.provider == providerKind }))
+    let references = Array(
+      Set(
+        references.filter {
+          $0.provider == providerKind && !archivedSessionIds.contains($0.sessionId)
+        }
+      )
+    )
     guard !references.isEmpty else { return }
 
     let sessionIds = Set(references.map(\.sessionId))
@@ -3095,6 +3121,7 @@ public final class CLISessionsViewModel {
     var materializedSessions: [CLISession] = []
 
     for reference in references {
+      guard !archivedSessionIds.contains(reference.sessionId) else { continue }
       monitoredSessionIds.insert(reference.sessionId)
 
       if let session = findSession(byId: reference.sessionId) {
@@ -3160,6 +3187,7 @@ public final class CLISessionsViewModel {
   /// Used for non-launch restoration scenarios (e.g., explicit user actions).
   /// Launch-time restoration is handled progressively via processPendingSessionRestorations().
   private func restoreMonitoredSessions(sessionIdsToRestore: Set<String>) {
+    let sessionIdsToRestore = sessionIdsToRestore.subtracting(archivedSessionIds)
     guard !sessionIdsToRestore.isEmpty else { return }
 
     for sessionId in sessionIdsToRestore {
@@ -3444,6 +3472,7 @@ public final class CLISessionsViewModel {
     let newSessions = sessions.filter { !monitoredSessionIds.contains($0.id) }
     guard !newSessions.isEmpty else { return }
 
+    archivedSessionIds.subtract(newSessions.map(\.id))
     var importedWorktreePaths = Set<String>()
     for session in newSessions {
       monitoredSessionIds.insert(session.id)
@@ -3663,6 +3692,7 @@ public final class CLISessionsViewModel {
       guard !Task.isCancelled else { return }
       await MainActor.run { [weak self] in
         self?.browseSessionsLoadState = .loaded
+        self?.loadCustomNames()
       }
     }
   }
@@ -4724,7 +4754,13 @@ public final class CLISessionsViewModel {
   /// Start monitoring a session.
   /// Defaults to terminal view mode with polling enabled for Preview/Plan buttons.
   public func startMonitoring(session: CLISession) {
-    guard !monitoredSessionIds.contains(session.id) else { return }
+    let wasArchived = archivedSessionIds.remove(session.id) != nil
+    guard !monitoredSessionIds.contains(session.id) else {
+      if wasArchived {
+        persistMonitoredSessions()
+      }
+      return
+    }
 
     monitoredSessionIds.insert(session.id)
     monitoredSessionBackup[session.id] = session
@@ -4762,6 +4798,15 @@ public final class CLISessionsViewModel {
     stopMonitoring(sessionId: session.id)
   }
 
+  /// Undoes an archive: monitoring resumes and a pin the archive cleared comes back.
+  /// The terminal process archiving stopped is not revived; it resumes when opened.
+  public func restoreArchivedSession(_ session: CLISession, wasPinned: Bool) {
+    startMonitoring(session: session)
+    if wasPinned, !pinnedSessionIds.contains(session.id) {
+      togglePin(for: session)
+    }
+  }
+
   public func monitoredSessions(inWorktreePath worktreePath: String) -> [CLISession] {
     monitoredSessions
       .map(\.session)
@@ -4782,6 +4827,7 @@ public final class CLISessionsViewModel {
 
   /// Stop monitoring by session ID
   public func stopMonitoring(sessionId: String) {
+    archivedSessionIds.insert(sessionId)
     if pinnedSessionIds.contains(sessionId) {
       // Archiving a pinned session is an explicit choice to let it go; clear
       // the pin so launch restore does not resurrect it as a durable anchor.
@@ -4804,9 +4850,19 @@ public final class CLISessionsViewModel {
     removeMonitorState(for: sessionId)
     monitoringCancellables.removeValue(forKey: sessionId)
 
-    // Remove and terminate the terminal process
+    // Remove and terminate the terminal process, including one still filed under
+    // the pending key it launched with (automated launches never mount a view, so
+    // their terminal can miss the pending → session transfer).
     removeTerminal(forKey: sessionId)
     removeAuxiliaryShellTerminal(forKey: sessionId)
+    for (pendingID, resolvedSessionID) in resolvedPendingSessionHistory where resolvedSessionID == sessionId {
+      removeTerminal(forKey: "pending-\(pendingID.uuidString)")
+    }
+    let provider = providerKind
+    Task {
+      await TerminalProcessRegistry.shared.terminateSessionTerminalProcesses(
+        provider: provider, sessionId: sessionId)
+    }
 
     syncFocusedSessionIdsToMonitor()
     persistMonitoredSessions()
@@ -4840,6 +4896,16 @@ public final class CLISessionsViewModel {
 
   /// Get all currently monitored sessions with their states.
   /// Uses a backup store to preserve sessions that may not yet be in history.jsonl.
+  /// Monitored sessions without their live state. Prefer this when the state is
+  /// not needed: reading `monitorStates` makes a view re-render on every token.
+  public var monitoredSessionList: [CLISession] {
+    var sessionsById: [String: CLISession] = [:]
+    for session in allSessions where monitoredSessionIds.contains(session.id) {
+      if sessionsById[session.id] == nil { sessionsById[session.id] = session }
+    }
+    return monitoredSessionIds.compactMap { sessionsById[$0] ?? monitoredSessionBackup[$0] }
+  }
+
   public var monitoredSessions: [(session: CLISession, state: SessionMonitorState?)] {
     // Single pass over allSessions: this property is recomputed by every
     // consumer on every monitor-state publish, and a per-id `first(where:)`
@@ -4975,6 +5041,14 @@ public final class CLISessionsViewModel {
     searchResults = []
     isSearching = false
     hasPerformedSearch = false
+  }
+
+  /// Finds review sessions created before durable pull-request links were available.
+  /// The global index is local and lightweight; exact pull-request matching remains
+  /// the responsibility of `GitHubReviewsViewModel`.
+  func githubReviewSessionSearchResults() async -> [SessionSearchResult] {
+    guard let searchService else { return [] }
+    return await searchService.search(query: "independent code review", filterPath: nil)
   }
 
   /// Called when user selects a search result - adds the repo and clears search

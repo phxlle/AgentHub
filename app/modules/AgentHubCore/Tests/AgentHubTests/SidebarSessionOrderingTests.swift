@@ -5,6 +5,69 @@ import Testing
 
 @Suite("Sidebar session ordering")
 struct SidebarSessionOrderingTests {
+  @Test("Side by side can yield to a session without losing the saved pair")
+  func sideBySideCanYieldAndReopen() {
+    let comparison = workflowComparison()
+    var state = WorkflowComparisonPresentationState()
+
+    state.retainAndPresent(comparison)
+    #expect(state.retainedComparison == comparison)
+    #expect(state.presentedComparison == comparison)
+
+    state.showStandaloneContent()
+    #expect(state.retainedComparison == comparison)
+    #expect(state.presentedComparison == nil)
+
+    #expect(state.presentRetainedComparison() == comparison)
+    #expect(state.presentedComparison == comparison)
+  }
+
+  @Test("Closing side by side removes the saved pair from the sidebar")
+  func closingSideBySideRemovesSavedPair() {
+    let comparison = workflowComparison()
+    var state = WorkflowComparisonPresentationState()
+    state.retainAndPresent(comparison)
+
+    #expect(state.close() == comparison)
+    #expect(state.retainedComparison == nil)
+    #expect(state.presentedComparison == nil)
+  }
+
+  @Test("Side-by-side pair resolves in implementation and review order")
+  func comparisonPairKeepsRoleOrder() throws {
+    let items = [
+      item("review", projectPath: "/tmp/Repo", timestamp: 300),
+      item("other", projectPath: "/tmp/Repo", timestamp: 200),
+      item("implementation", projectPath: "/tmp/Repo", timestamp: 100),
+    ]
+
+    let comparison = try #require(
+      SidebarSessionOrdering.comparisonItems(
+        from: items,
+        implementationID: "implementation",
+        reviewID: "review",
+        id: { $0.id }
+      )
+    )
+
+    #expect(comparison.implementation.id == "implementation")
+    #expect(comparison.review.id == "review")
+  }
+
+  @Test("Side-by-side pair waits until both sessions are available")
+  func comparisonPairRequiresBothSessions() {
+    let items = [item("implementation", projectPath: "/tmp/Repo", timestamp: 100)]
+
+    let comparison = SidebarSessionOrdering.comparisonItems(
+      from: items,
+      implementationID: "implementation",
+      reviewID: "review",
+      id: { $0.id }
+    )
+
+    #expect(comparison == nil)
+  }
+
   @Test("Repo grouping flattens by module order instead of global timestamp")
   func repoGroupingFlattensByModuleOrder() {
     let repoA = SelectedRepository(
@@ -129,6 +192,62 @@ struct SidebarSessionOrderingTests {
     let ids = flattenedIDs(items, groupMode: .status)
 
     #expect(ids == ["approval", "working", "ready", "idle-newest"])
+  }
+
+  @Test("Sessions that need a human action lead every grouping mode")
+  func sessionsNeedingAttentionComeFirst() {
+    let items = [
+      item("working-newest", timestamp: 500, status: .thinking),
+      item("input", timestamp: 300, status: .awaitingApproval(tool: "request_user_input")),
+      item("approval", timestamp: 100, status: .awaitingApproval(tool: "Bash")),
+    ]
+
+    #expect(flattenedIDs(items, groupMode: .repo) == ["approval", "input", "working-newest"])
+    #expect(flattenedIDs(items, groupMode: .status) == ["approval", "input", "working-newest"])
+  }
+
+  @Test("Attention section does not duplicate pinned sessions")
+  func attentionSectionOwnsPinnedSessionsThatNeedInput() {
+    let items = [
+      item("ordinary-pinned", timestamp: 400, isPinned: true),
+      item(
+        "input-pinned", timestamp: 300,
+        status: .awaitingApproval(tool: "request_user_input"), isPinned: true),
+      item("ordinary", timestamp: 200),
+    ]
+
+    #expect(
+      flattenedIDs(items, groupMode: .repo)
+        == ["input-pinned", "ordinary-pinned", "ordinary"])
+  }
+
+  @Test("Collapsed attention section is skipped by keyboard navigation")
+  func collapsedAttentionSectionIsSkipped() {
+    let items = [
+      item("input", timestamp: 300, status: .awaitingApproval(tool: "AskUserQuestion")),
+      item("ordinary", timestamp: 200),
+    ]
+
+    #expect(
+      flattenedIDs(items, groupMode: .repo, isAttentionSectionCollapsed: true)
+        == ["ordinary"])
+  }
+
+  @Test("A completed agent response is ready but does not require attention")
+  func completedResponseDoesNotRequireAttention() {
+    let items = [
+      item("completed", timestamp: 300, status: .waitingForUser),
+      item("working", timestamp: 200, status: .thinking),
+    ]
+
+    #expect(
+      SidebarSessionOrdering.attentionItems(
+        from: items,
+        status: { $0.status },
+        timestamp: { $0.timestamp },
+        id: { $0.id }
+      ).isEmpty)
+    #expect(flattenedIDs(items, groupMode: .repo) == ["completed", "working"])
   }
 
   @Test("Pinned sessions stay first before the active grouping")
@@ -331,18 +450,41 @@ struct SidebarSessionOrderingTests {
     #expect(result == ["a", "b", "c"])
   }
 
-  @Test("Next ID indexes through the flattened order without wrapping")
+  @Test("Next ID cycles through the flattened open-session order")
   func nextIDIndexesThroughFlattenedOrder() {
     let ids = ["first", "second", "third"]
 
+    #expect(
+      SidebarSessionOrdering.nextID(in: [], currentID: nil, direction: .forward) == nil)
+    #expect(
+      SidebarSessionOrdering.nextID(in: ["only"], currentID: "only", direction: .forward)
+        == "only")
     #expect(SidebarSessionOrdering.nextID(in: ids, currentID: nil, direction: .forward) == "first")
     #expect(
       SidebarSessionOrdering.nextID(in: ids, currentID: "first", direction: .forward) == "second")
     #expect(
-      SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .forward) == "third")
+      SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .forward) == "first")
     #expect(
       SidebarSessionOrdering.nextID(in: ids, currentID: "third", direction: .backward) == "second")
+    #expect(
+      SidebarSessionOrdering.nextID(in: ids, currentID: "first", direction: .backward) == "third")
   }
+}
+
+private func workflowComparison() -> WorkflowSessionComparisonRequest {
+  WorkflowSessionComparisonRequest(
+    id: UUID(uuidString: "E61601BE-9907-41D4-9645-3DC1755941DB")!,
+    workflowID: "workflow",
+    title: "XFA-1234",
+    implementation: WorkflowSessionComparisonTarget(
+      providerKind: .codex,
+      session: CLISession(id: "implementation", projectPath: "/tmp/Repo")
+    ),
+    review: WorkflowSessionComparisonTarget(
+      providerKind: .claude,
+      session: CLISession(id: "review", projectPath: "/tmp/Repo")
+    )
+  )
 }
 
 private struct SidebarTestItem {
@@ -376,6 +518,7 @@ private func flattenedIDs(
   worktreeDisplayMode: WorktreeDisplayMode = .parent,
   collapsedProjectGroups: Set<String> = [],
   collapsedStatusGroups: Set<StatusGroupCategory> = [],
+  isAttentionSectionCollapsed: Bool = false,
   isPinnedSectionCollapsed: Bool = false,
   manualOrder: [String: Int] = [:]
 ) -> [String] {
@@ -386,6 +529,7 @@ private func flattenedIDs(
     worktreeDisplayMode: worktreeDisplayMode,
     collapsedProjectGroups: collapsedProjectGroups,
     collapsedStatusGroups: collapsedStatusGroups,
+    isAttentionSectionCollapsed: isAttentionSectionCollapsed,
     isPinnedSectionCollapsed: isPinnedSectionCollapsed,
     isPinned: { $0.isPinned },
     projectPath: { $0.projectPath },

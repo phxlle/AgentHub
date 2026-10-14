@@ -133,12 +133,16 @@ struct ThemeManagerTests {
     defer { fixture.teardown() }
     fixture.defaults.set("sentry.yaml", forKey: AgentHubDefaults.selectedTheme)
     let selectedThemeWrites = fixture.defaults.setCount(forKey: AgentHubDefaults.selectedTheme)
-    let previousThemeWrites = fixture.defaults.setCount(forKey: AgentHubDefaults.previousNonGhosttyTheme)
+    let previousThemeWrites = fixture.defaults.setCount(
+      forKey: AgentHubDefaults.previousNonGhosttyTheme)
 
     _ = fixture.makeManager(loader: RecordingThemeLoadingService())
 
-    #expect(fixture.defaults.setCount(forKey: AgentHubDefaults.selectedTheme) == selectedThemeWrites)
-    #expect(fixture.defaults.setCount(forKey: AgentHubDefaults.previousNonGhosttyTheme) == previousThemeWrites)
+    #expect(
+      fixture.defaults.setCount(forKey: AgentHubDefaults.selectedTheme) == selectedThemeWrites)
+    #expect(
+      fixture.defaults.setCount(forKey: AgentHubDefaults.previousNonGhosttyTheme)
+        == previousThemeWrites)
   }
 
   @MainActor
@@ -176,7 +180,8 @@ struct ThemeManagerTests {
 
     #expect(manager.currentTheme.sourceFileName == "sentry.yaml")
     #expect(await loader.loadCount() == 1)
-    #expect(fixture.defaults.setCount(forKey: AgentHubDefaults.selectedTheme) == selectedThemeWrites)
+    #expect(
+      fixture.defaults.setCount(forKey: AgentHubDefaults.selectedTheme) == selectedThemeWrites)
   }
 
   @MainActor
@@ -280,6 +285,29 @@ struct ThemeManagerTests {
     #expect(manager.currentTheme.backgroundDark == Color(hex: "#002b36"))
   }
 
+  @Test("Workspace panels use the selected theme's expanded background")
+  func workspacePanelsUseExpandedThemeBackground() throws {
+    let theme = try runtimeTheme(
+      backgroundDark: "#112233",
+      expandedContentDark: "#0A0B0C"
+    )
+
+    #expect(
+      Color.themedPanelBackground(for: .dark, theme: theme)
+        == Color(hex: "#0A0B0C")
+    )
+  }
+
+  @Test("Workspace panels stay in the selected theme without an expanded background")
+  func workspacePanelsFallBackToThemeBackground() throws {
+    let theme = try runtimeTheme(backgroundDark: "#112233")
+
+    #expect(
+      Color.themedPanelBackground(for: .dark, theme: theme)
+        == Color(hex: "#112233")
+    )
+  }
+
   private final class Fixture {
     let themesDirectory: URL
     let suiteName: String
@@ -288,7 +316,8 @@ struct ThemeManagerTests {
     init() throws {
       self.themesDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ThemeManagerTests-\(UUID().uuidString)", isDirectory: true)
-      try FileManager.default.createDirectory(at: themesDirectory, withIntermediateDirectories: true)
+      try FileManager.default.createDirectory(
+        at: themesDirectory, withIntermediateDirectories: true)
 
       self.suiteName = "ThemeManagerTests.\(UUID().uuidString)"
       guard let defaults = CountingUserDefaults(suiteName: suiteName) else {
@@ -327,18 +356,39 @@ struct ThemeManagerTests {
     tertiary: String = "#778899"
   ) throws -> LoadedYAMLTheme {
     let yaml = """
-    name: "\(name)"
-    version: "1.0"
-    colors:
-      brand:
-        primary: "\(primary)"
-        secondary: "\(secondary)"
-        tertiary: "\(tertiary)"
-    """
+      name: "\(name)"
+      version: "1.0"
+      colors:
+        brand:
+          primary: "\(primary)"
+          secondary: "\(secondary)"
+          tertiary: "\(tertiary)"
+      """
     let theme = try YAMLThemeParser().parse(data: Data(yaml.utf8))
     return LoadedYAMLTheme(
       theme: theme,
       palette: ThemePalette(primary: primary, secondary: secondary, tertiary: tertiary)
     )
+  }
+
+  private func runtimeTheme(
+    backgroundDark: String,
+    expandedContentDark: String? = nil
+  ) throws -> RuntimeTheme {
+    var yaml = """
+      name: "Workspace"
+      version: "1.0"
+      colors:
+        brand:
+          primary: "#112233"
+          secondary: "#445566"
+          tertiary: "#778899"
+        backgrounds:
+          dark: "\(backgroundDark)"
+      """
+    if let expandedContentDark {
+      yaml += "\n    expandedContentDark: \"\(expandedContentDark)\""
+    }
+    return RuntimeTheme(from: try YAMLThemeParser().parse(data: Data(yaml.utf8)))
   }
 }

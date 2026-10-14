@@ -56,6 +56,11 @@ public struct CLISessionRow: View {
       }
       .agentHubFlatRow(isHighlighted: isMonitoring, providerKind: providerKind)
       .help(isMonitoring ? "Stop monitoring" : "Monitor session")
+      .sessionManagementActions(
+        session: session,
+        providerKind: providerKind,
+        customName: customName
+      )
   }
 
   // MARK: - Session Row Content
@@ -67,7 +72,8 @@ public struct CLISessionRow: View {
 
       // Message preview (first or last based on toggle)
       if let message = showLastMessage ? session.lastMessage : session.firstMessage,
-         !message.isEmpty {
+        !message.isEmpty
+      {
         Text(message.prefix(80) + (message.count > 80 ? "..." : ""))
           .font(.secondarySmall)
           .foregroundColor(.primary.opacity(0.8))
@@ -76,6 +82,11 @@ public struct CLISessionRow: View {
 
       // Metadata row
       metadataRow
+
+      SessionWorkflowAssociationBadge(
+        session: session,
+        providerKind: providerKind
+      )
     }
   }
 
@@ -237,10 +248,10 @@ extension Date {
         slug: "cryptic-orbiting-flame"
       ),
       isMonitoring: false,
-      onConnect: { },
-      onCopyId: { },
-      onOpenFile: { },
-      onToggleMonitoring: { }
+      onConnect: {},
+      onCopyId: {},
+      onOpenFile: {},
+      onToggleMonitoring: {}
     )
 
     // Inactive worktree session with long message (being monitored)
@@ -253,14 +264,15 @@ extension Date {
         lastActivityAt: Date().addingTimeInterval(-3600),
         messageCount: 15,
         isActive: false,
-        firstMessage: "Help me implement a new SwiftUI view that displays session data in a hierarchical tree structure with expand/collapse functionality",
+        firstMessage:
+          "Help me implement a new SwiftUI view that displays session data in a hierarchical tree structure with expand/collapse functionality",
         slug: "async-coalescing-summit"
       ),
       isMonitoring: true,
-      onConnect: { },
-      onCopyId: { },
-      onOpenFile: { },
-      onToggleMonitoring: { }
+      onConnect: {},
+      onCopyId: {},
+      onOpenFile: {},
+      onToggleMonitoring: {}
     )
 
     // Session without slug (falls back to shortId)
@@ -276,10 +288,10 @@ extension Date {
         firstMessage: nil
       ),
       isMonitoring: false,
-      onConnect: { },
-      onCopyId: { },
-      onOpenFile: { },
-      onToggleMonitoring: { }
+      onConnect: {},
+      onCopyId: {},
+      onOpenFile: {},
+      onToggleMonitoring: {}
     )
   }
   .padding()

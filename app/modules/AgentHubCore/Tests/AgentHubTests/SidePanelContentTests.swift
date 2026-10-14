@@ -1,4 +1,6 @@
+import AgentHubGitHub
 import Testing
+
 @testable import AgentHubCore
 
 @Suite("SidePanelContent pending-session rebinding")
@@ -13,11 +15,13 @@ struct SidePanelContentTests {
       projectPath: pending.projectPath
     )
 
-    #expect(content.replacingPendingSession(with: real) == .simulator(
-      sessionId: real.id,
-      session: real,
-      projectPath: real.projectPath
-    ))
+    #expect(
+      content.replacingPendingSession(with: real)
+        == .simulator(
+          sessionId: real.id,
+          session: real,
+          projectPath: real.projectPath
+        ))
   }
 
   @Test("Pending web preview panel still rebinds to the real session")
@@ -31,12 +35,14 @@ struct SidePanelContentTests {
       mode: .app
     )
 
-    #expect(content.replacingPendingSession(with: real) == .webPreview(
-      sessionId: real.id,
-      session: real,
-      projectPath: real.projectPath,
-      mode: .app
-    ))
+    #expect(
+      content.replacingPendingSession(with: real)
+        == .webPreview(
+          sessionId: real.id,
+          session: real,
+          projectPath: real.projectPath,
+          mode: .app
+        ))
   }
 
   @Test("Pending panels do not rebind across project paths")
@@ -63,5 +69,31 @@ struct SidePanelContentTests {
     )
 
     #expect(content.replacingPendingSession(with: real) == nil)
+  }
+
+  @Test("GitHub panel identity includes the linked pull request")
+  func gitHubPanelIdentityIncludesPullRequestContext() throws {
+    let session = CLISession(id: "review-session", projectPath: "/tmp/project")
+    let pullRequest807 = try #require(
+      GitHubPullRequestURLReference(urlString: "https://github.com/test/repo/pull/807")
+    )
+    let pullRequest788 = try #require(
+      GitHubPullRequestURLReference(urlString: "https://github.com/test/repo/pull/788")
+    )
+
+    let expected = SidePanelContent.gitHub(
+      sessionId: session.id,
+      session: session,
+      projectPath: session.projectPath,
+      linkedPullRequests: [pullRequest807]
+    )
+    let stale = SidePanelContent.gitHub(
+      sessionId: session.id,
+      session: session,
+      projectPath: session.projectPath,
+      linkedPullRequests: [pullRequest788]
+    )
+
+    #expect(expected != stale)
   }
 }

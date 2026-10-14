@@ -9,7 +9,7 @@ enum AgentWorkflowListScope: String, CaseIterable, Identifiable, Sendable {
   var id: Self { self }
 }
 
-enum DetectedAgentRole: String, Sendable {
+enum DetectedAgentRole: String, Codable, Sendable {
   case implementer
   case reviewer
 }
@@ -65,6 +65,18 @@ struct WorkflowSessionLibraryItem: Identifiable, Sendable, Equatable {
   let assignment: DetectedAgentSession
   let workflowTitle: String?
   let isAnalyzed: Bool
+}
+
+struct SessionWorkflowDestination: Identifiable, Sendable, Equatable {
+  let id: String
+  let title: String
+}
+
+struct SessionWorkflowAssociation: Sendable, Equatable {
+  let workflowID: String
+  let title: String
+  let role: DetectedAgentRole
+  let comparisonRequest: WorkflowSessionComparisonRequest?
 }
 
 struct DetectedPullRequest: Sendable, Equatable {
@@ -273,8 +285,11 @@ enum AgentSessionWorkflowClassifier {
       branch.manualWorkflowID ?? branch.ticketKey ?? "unassigned:\(branch.repositoryPath)"
     }
 
-    return groups.map { id, branches in
+    return groups.compactMap { id, branches in
       let ticketKey = branches.compactMap(\.ticketKey).first
+      guard isConfidentWorkflow(id: id, ticketKey: ticketKey, branches: branches) else {
+        return nil
+      }
       let summary = summaryText(for: branches)
       return DetectedTicketWorkflow(
         id: id,
@@ -313,11 +328,17 @@ enum AgentSessionWorkflowClassifier {
     let responseToReviewScore =
       score(firstText, terms: responseToReviewTerms, weight: 5)
       + score(remainingText, terms: responseToReviewTerms, weight: 2)
+    let isExplicitIndependentReviewer =
+      firstText.contains("independent read-only review agent")
 
     let role: DetectedAgentRole
     let confidence: AgentDetectionConfidence
     let reason: String
-    if reviewScore >= implementScore + 2 && responseToReviewScore == 0 {
+    if isExplicitIndependentReviewer {
+      role = .reviewer
+      confidence = .high
+      reason = "Explicit independent reviewer instruction detected"
+    } else if reviewScore >= implementScore + 2 && responseToReviewScore == 0 {
       role = .reviewer
       confidence = reviewScore >= 6 ? .high : .medium
       reason = "Review language detected in the session"
@@ -362,6 +383,41 @@ enum AgentSessionWorkflowClassifier {
       result["\(ticketKey)|\(repositoryPath)", default: []].insert(branch)
     }
     return result
+  }
+
+  private static func isConfidentWorkflow(
+    id: String,
+    ticketKey: String?,
+    branches: [DetectedBranchWorkflow]
+  ) -> Bool {
+    if id.hasPrefix("manual:") || branches.contains(where: { $0.manualWorkflowID != nil }) {
+      return true
+    }
+    guard let ticketKey else { return false }
+
+    let assignments = branches.flatMap { $0.implementerSessions + $0.reviewerSessions }
+    if Set(assignments.map(\.id)).count >= 2 {
+      return true
+    }
+
+    let branchEvidence = branches.contains { branch in
+      containsTicket(ticketKey, in: branch.branchName)
+        || containsTicket(ticketKey, in: branch.pullRequest?.headBranch)
+    }
+    let sessionEvidence = assignments.contains { assignment in
+      containsTicket(ticketKey, in: assignment.session.firstMessage)
+        || containsTicket(ticketKey, in: assignment.session.lastMessage)
+        || containsTicket(ticketKey, in: assignment.session.slug)
+    }
+    let pullRequestEvidence = branches.contains { branch in
+      containsTicket(ticketKey, in: branch.pullRequest?.title)
+    }
+
+    return pullRequestEvidence || (branchEvidence && sessionEvidence)
+  }
+
+  private static func containsTicket(_ ticketKey: String, in value: String?) -> Bool {
+    value?.range(of: ticketKey, options: [.caseInsensitive, .diacriticInsensitive]) != nil
   }
 
   private static func normalizedPath(_ path: String) -> String {

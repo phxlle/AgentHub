@@ -68,6 +68,7 @@ struct GitHubSessionRowStatusLine: View {
     }
 
     if observationState.isUnavailable {
+      if isRateLimited { return "GitHub rate limited" }
       return lastRefreshedAt == nil
         ? "GitHub unavailable"
         : "Last known: \(statusText)"
@@ -175,6 +176,10 @@ struct GitHubSessionRowStatusLine: View {
       return "CI checks are refreshing."
     }
 
+    if isRateLimited {
+      return "GitHub's hourly API quota for your account is used up (shared with every agent running gh). Status refreshes again once it resets, within the hour."
+    }
+
     if observationState.isUnavailable {
       let availability = lastRefreshedAt == nil
         ? "GitHub status is unavailable."
@@ -215,5 +220,14 @@ struct GitHubSessionRowStatusLine: View {
 
   private var blockers: Set<GitHubPRBlocker> {
     GitHubPRBlocker.blockers(for: pullRequest, ciSummary: summary)
+  }
+
+  private var isRateLimited: Bool {
+    switch observationState {
+    case .error(let message), .paused(let message):
+      return GitHubReviewRecoveryIssue.indicatesRateLimit(message)
+    default:
+      return false
+    }
   }
 }

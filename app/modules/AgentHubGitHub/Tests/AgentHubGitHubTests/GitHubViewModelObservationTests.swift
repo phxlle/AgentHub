@@ -10,8 +10,8 @@ import Testing
 
 @testable import AgentHubGitHub
 
-private extension NSLock {
-  func withLock<T>(_ body: () throws -> T) rethrows -> T {
+extension NSLock {
+  fileprivate func withLock<T>(_ body: () throws -> T) rethrows -> T {
     lock()
     defer { unlock() }
     return try body()
@@ -47,10 +47,13 @@ private func makeViewModelObservationPR(
 }
 
 private func makeViewModelObservationCheck(name: String = "Build") -> GitHubCheckRun {
-  GitHubCheckRun(name: name, status: "COMPLETED", conclusion: "SUCCESS", bucket: nil, detailsUrl: nil)
+  GitHubCheckRun(
+    name: name, status: "COMPLETED", conclusion: "SUCCESS", bucket: nil, detailsUrl: nil)
 }
 
-private final class MockGitHubPRObservationService: GitHubPRObservationServiceProtocol, @unchecked Sendable {
+private final class MockGitHubPRObservationService: GitHubPRObservationServiceProtocol,
+  @unchecked Sendable
+{
   private let lock = NSLock()
   private var continuations: [UUID: AsyncStream<GitHubPRObservationSnapshot>.Continuation] = [:]
   private var targetsByID: [UUID: GitHubPRObservationTarget] = [:]
@@ -138,25 +141,107 @@ struct GitHubViewModelObservationTests {
     )
     let observer = MockGitHubPRObservationService()
     let viewModel = GitHubViewModel(service: service, observationService: observer)
-    let target = GitHubPRObservationTarget.currentBranch(projectPath: "/tmp/repo", branchName: "feature")
+    let target = GitHubPRObservationTarget.currentBranch(
+      projectPath: "/tmp/repo", branchName: "feature")
 
     await viewModel.setup(repoPath: "/tmp/repo", branchName: "feature")
     try? await Task.sleep(for: .milliseconds(10))
 
     #expect(observer.subscribedTargets == [target])
 
-    observer.publish(GitHubPRObservationSnapshot(
-      target: target,
-      pullRequest: makeViewModelObservationPR(number: 12),
-      checks: [makeViewModelObservationCheck()],
-      state: .ready,
-      lastRefreshedAt: .now
-    ))
+    observer.publish(
+      GitHubPRObservationSnapshot(
+        target: target,
+        pullRequest: makeViewModelObservationPR(number: 12),
+        checks: [makeViewModelObservationCheck()],
+        state: .ready,
+        lastRefreshedAt: .now
+      ))
     try? await Task.sleep(for: .milliseconds(10))
 
     #expect(viewModel.currentBranchPR?.number == 12)
     #expect(viewModel.currentBranchChecks.count == 1)
     #expect(viewModel.currentBranchObservationState == .ready)
+  }
+
+  @Test("Linked session PR replaces a stale selection and bypasses branch discovery")
+  @MainActor
+  func linkedSessionPullRequestIsAuthoritative() async throws {
+    let service = MockGitHubCLIService()
+    service.repoInfoResult = GitHubRepoInfo(
+      owner: "test",
+      name: "repo",
+      fullName: "test/repo",
+      defaultBranch: "main",
+      isPrivate: false,
+      url: "https://github.com/test/repo"
+    )
+    service.pullRequestResult = makeViewModelObservationPR(number: 807, title: "Expected")
+    service.pullRequestDiffResult = ""
+    service.pullRequestFilesResult = []
+    service.reviewCommentsResult = []
+    let viewModel = GitHubViewModel(service: service)
+    await viewModel.setup(repoPath: "/tmp/repo", branchName: "main")
+    viewModel.selectedPR = makeViewModelObservationPR(number: 788, title: "Stale")
+
+    let linkedPullRequest = try #require(
+      GitHubPullRequestURLReference(urlString: "https://github.com/test/repo/pull/807")
+    )
+    #expect(
+      !viewModel.isConfigured(
+        repoPath: "/tmp/repo",
+        branchName: "main",
+        linkedPullRequests: [linkedPullRequest]
+      )
+    )
+
+    await viewModel.setup(
+      repoPath: "/tmp/repo",
+      branchName: "main",
+      linkedPullRequests: [linkedPullRequest]
+    )
+    #expect(viewModel.selectedPR == nil)
+
+    await viewModel.loadCurrentBranchPR()
+    await viewModel.focusPreferredPullRequestIfAvailable()
+
+    #expect(viewModel.currentBranchPR?.number == 807)
+    #expect(viewModel.selectedPR?.number == 807)
+    #expect(service.getPullRequestNumber == 807)
+    #expect(!service.getCurrentBranchPRCalled)
+  }
+
+  @Test("Linked PR context is included in the observation target")
+  @MainActor
+  func linkedPullRequestIsObservedAsSessionContext() async throws {
+    let service = MockGitHubCLIService()
+    service.repoInfoResult = GitHubRepoInfo(
+      owner: "test",
+      name: "repo",
+      fullName: "test/repo",
+      defaultBranch: "main",
+      isPrivate: false,
+      url: "https://github.com/test/repo"
+    )
+    let observer = MockGitHubPRObservationService()
+    let viewModel = GitHubViewModel(service: service, observationService: observer)
+    let linkedPullRequest = try #require(
+      GitHubPullRequestURLReference(urlString: "https://github.com/test/repo/pull/807")
+    )
+    let target = GitHubPRObservationTarget.session(
+      projectPath: "/tmp/repo",
+      branchName: "main",
+      linkedPullRequests: [linkedPullRequest]
+    )
+
+    await viewModel.setup(
+      repoPath: "/tmp/repo",
+      branchName: "main",
+      linkedPullRequests: [linkedPullRequest]
+    )
+    try? await Task.sleep(for: .milliseconds(10))
+
+    #expect(observer.subscribedTargets == [target])
   }
 
   @Test("selectPR starts selected PR observation and updates checks")
@@ -184,13 +269,14 @@ struct GitHubViewModelObservationTests {
     let target = GitHubPRObservationTarget.pullRequest(projectPath: "/tmp/repo", number: 44)
     #expect(observer.subscribedTargets.contains(target))
 
-    observer.publish(GitHubPRObservationSnapshot(
-      target: target,
-      pullRequest: makeViewModelObservationPR(number: 44, title: "Updated"),
-      checks: [makeViewModelObservationCheck(name: "Tests")],
-      state: .ready,
-      lastRefreshedAt: .now
-    ))
+    observer.publish(
+      GitHubPRObservationSnapshot(
+        target: target,
+        pullRequest: makeViewModelObservationPR(number: 44, title: "Updated"),
+        checks: [makeViewModelObservationCheck(name: "Tests")],
+        state: .ready,
+        lastRefreshedAt: .now
+      ))
     try? await Task.sleep(for: .milliseconds(10))
 
     #expect(viewModel.selectedPR?.title == "Updated")

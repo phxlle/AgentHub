@@ -167,8 +167,21 @@ struct AgentHubGhosttyAppearanceConfigurationTests {
       .map { $0.trimmingCharacters(in: .whitespaces) }
       .filter { !$0.isEmpty && !$0.hasPrefix("#") }
     // The user's own config/theme must supply every color: the only active
-    // directive is the transparency that lets the app paint the backdrop.
-    #expect(activeLines == ["background-opacity = 0"])
+    // non-keybind directive is the transparency that lets the app paint the backdrop.
+    #expect(activeLines.filter { !$0.hasPrefix("keybind") } == ["background-opacity = 0"])
+    #expect(activeLines.contains("keybind = super+digit_2=unbind"))
+  }
+
+  @Test("Bundled overlays free Cmd+1..4 for the workspace switcher")
+  func bundledOverlaysUnbindWorkspaceShortcuts() throws {
+    for isDark in [true, false] {
+      let path = try #require(AgentHubGhosttyAppearanceConfiguration.path(isDark: isDark))
+      let contents = try String(contentsOfFile: path, encoding: .utf8)
+      for digit in 1...4 {
+        #expect(contents.contains("keybind = super+digit_\(digit)=unbind"))
+        #expect(contents.contains("keybind = super+\(digit)=unbind"))
+      }
+    }
   }
 
   @Test("Passthrough path changes with the adopted background")

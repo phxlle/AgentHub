@@ -1,6 +1,6 @@
+import AgentHubGitHub
 import Foundation
 import Testing
-import AgentHubGitHub
 
 @testable import AgentHubCore
 @testable import AgentHubGlobalSessionPanel
@@ -187,6 +187,28 @@ struct GlobalSessionControlPanelTests {
     #expect(router.selectionRequest == nil)
   }
 
+  @Test("Selection router preserves the exact session needed by workflow navigation")
+  func selectionRouterPreservesExactWorkflowSession() {
+    let router = GlobalSessionSelectionRouter()
+    let session = CLISession(
+      id: "019feaf1-exact",
+      projectPath: "/tmp/gmail-workflow",
+      branchName: "feature/company-email-only",
+      firstMessage: "Only allow company email accounts"
+    )
+
+    router.select(
+      providerKind: .codex,
+      sessionId: session.id,
+      projectPath: session.projectPath,
+      session: session
+    )
+
+    #expect(router.selectionRequest?.sessionId == "019feaf1-exact")
+    #expect(router.selectionRequest?.itemId == "codex-019feaf1-exact")
+    #expect(router.selectionRequest?.session == session)
+  }
+
   @Test("Selection router preserves explicit pending item ids")
   func selectionRouterPreservesPendingItemID() {
     let router = GlobalSessionSelectionRouter()
@@ -200,6 +222,33 @@ struct GlobalSessionControlPanelTests {
     )
 
     #expect(router.selectionRequest?.itemId == pendingItemID)
+  }
+
+  @Test("Side-by-side comparison stays active until explicitly closed")
+  func sideBySideComparisonRequiresExplicitClose() throws {
+    let defaults = makeDefaults()
+    let router = GlobalSessionSelectionRouter(defaults: defaults)
+    let comparison = workflowComparison()
+
+    router.compare(comparison)
+    router.markConsumed(comparison)
+    router.select(
+      providerKind: .codex,
+      sessionId: "another-session",
+      projectPath: "/tmp/repo"
+    )
+
+    #expect(router.comparisonRequest == nil)
+    #expect(router.activeComparison == comparison)
+
+    let restoredRouter = GlobalSessionSelectionRouter(defaults: defaults)
+    #expect(restoredRouter.activeComparison == comparison)
+
+    restoredRouter.closeComparison(comparison)
+    #expect(restoredRouter.activeComparison == nil)
+    #expect(
+      GlobalSessionSelectionRouter(defaults: defaults).activeComparison == nil
+    )
   }
 
   @Test("Snapshot ordering prioritizes attention before recency")
@@ -235,14 +284,15 @@ struct GlobalSessionControlPanelTests {
 
     let sorted = GlobalSessionControlPanelSnapshotBuilder.sorted(items)
 
-    #expect(sorted.map(\.id) == [
-      "approval-old",
-      "ci-failure",
-      "working",
-      "pending-ci",
-      "ready",
-      "idle-new",
-    ])
+    #expect(
+      sorted.map(\.id) == [
+        "approval-old",
+        "ci-failure",
+        "working",
+        "pending-ci",
+        "ready",
+        "idle-new",
+      ])
   }
 
   @Test("Review and merge blockers raise idle sessions without displacing active work")
@@ -272,10 +322,11 @@ struct GlobalSessionControlPanelTests {
 
     #expect(blockedIdle.attention == .gitHubBlocked)
     #expect(blockedWorking.attention == .working)
-    #expect(GlobalSessionControlPanelSnapshotBuilder.sorted([
-      blockedWorking,
-      blockedIdle,
-    ]).map(\.id) == ["blocked-idle", "blocked-working"])
+    #expect(
+      GlobalSessionControlPanelSnapshotBuilder.sorted([
+        blockedWorking,
+        blockedIdle,
+      ]).map(\.id) == ["blocked-idle", "blocked-working"])
   }
 
   @Test("Compact selector uses most recent active row")
@@ -309,30 +360,53 @@ struct GlobalSessionControlPanelTests {
     let ids = ["a", "b", "c"]
 
     // No current selection: down lands on the first row, up lands on the last.
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: nil, direction: .down, itemIDs: ids) == "a")
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: nil, direction: .up, itemIDs: ids) == "c")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: nil, direction: .down, itemIDs: ids)
+        == "a")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: nil, direction: .up, itemIDs: ids) == "c"
+    )
 
     // Moving down advances one row at a time.
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "a", direction: .down, itemIDs: ids) == "b")
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "b", direction: .down, itemIDs: ids) == "c")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "a", direction: .down, itemIDs: ids)
+        == "b")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "b", direction: .down, itemIDs: ids)
+        == "c")
 
     // Down clamps at the bottom, up clamps at the top.
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "c", direction: .down, itemIDs: ids) == "c")
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "b", direction: .up, itemIDs: ids) == "a")
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "a", direction: .up, itemIDs: ids) == "a")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "c", direction: .down, itemIDs: ids)
+        == "c")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "b", direction: .up, itemIDs: ids) == "a"
+    )
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "a", direction: .up, itemIDs: ids) == "a"
+    )
 
     // A stale selection falls back to an edge instead of returning nothing.
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "z", direction: .down, itemIDs: ids) == "a")
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "z", direction: .down, itemIDs: ids)
+        == "a")
 
     // An empty list never yields a selection.
-    #expect(GlobalSessionPanelNavigator.nextSelection(currentID: "a", direction: .down, itemIDs: []) == nil)
+    #expect(
+      GlobalSessionPanelNavigator.nextSelection(currentID: "a", direction: .down, itemIDs: [])
+        == nil)
   }
 
   @Test("Selection validation keeps valid rows and recovers from removals")
   func validatedSelectionRecoversFromRemovals() {
-    #expect(GlobalSessionPanelNavigator.validatedSelection(currentID: "b", itemIDs: ["a", "b", "c"]) == "b")
-    #expect(GlobalSessionPanelNavigator.validatedSelection(currentID: "x", itemIDs: ["a", "b", "c"]) == "a")
-    #expect(GlobalSessionPanelNavigator.validatedSelection(currentID: nil, itemIDs: ["a", "b"]) == "a")
+    #expect(
+      GlobalSessionPanelNavigator.validatedSelection(currentID: "b", itemIDs: ["a", "b", "c"])
+        == "b")
+    #expect(
+      GlobalSessionPanelNavigator.validatedSelection(currentID: "x", itemIDs: ["a", "b", "c"])
+        == "a")
+    #expect(
+      GlobalSessionPanelNavigator.validatedSelection(currentID: nil, itemIDs: ["a", "b"]) == "a")
     #expect(GlobalSessionPanelNavigator.validatedSelection(currentID: "a", itemIDs: []) == nil)
   }
 
@@ -376,7 +450,7 @@ struct GlobalSessionControlPanelTests {
         path: repoPath,
         worktrees: [
           WorktreeBranch(name: "main", path: repoPath, isWorktree: false),
-          WorktreeBranch(name: "feature", path: worktreePath, isWorktree: true)
+          WorktreeBranch(name: "feature", path: worktreePath, isWorktree: true),
         ]
       )
     ]
@@ -401,21 +475,25 @@ struct GlobalSessionControlPanelTests {
 
   @Test("Cleanup suggestions require merged PR evidence")
   func cleanupSuggestionsRequireMergedPullRequestEvidence() {
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "no-github", gitHubState: nil)
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(id: "no-github", gitHubState: nil)
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "open", gitHubState: gitHubState(state: .open))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(id: "open", gitHubState: gitHubState(state: .open))
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "closed", gitHubState: gitHubState(state: .closed))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(id: "closed", gitHubState: gitHubState(state: .closed))
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "unknown", gitHubState: gitHubState(state: .unknown("UNKNOWN")))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(id: "unknown", gitHubState: gitHubState(state: .unknown("UNKNOWN")))
+      ]).isEmpty)
   }
 
   @Test("Cleanup suggestions block unsafe worktree state")
@@ -427,52 +505,71 @@ struct GlobalSessionControlPanelTests {
       gitHubState: gitHubState(number: 88, state: .merged)
     )
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "active", path: worktreePath, isActive: true, gitHubState: gitHubState(state: .merged))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(
+          id: "active", path: worktreePath, isActive: true, gitHubState: gitHubState(state: .merged)
+        )
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      safeMerged,
-      cleanupItem(id: "pending", path: worktreePath, isPending: true, status: nil, gitHubState: nil),
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        safeMerged,
+        cleanupItem(
+          id: "pending", path: worktreePath, isPending: true, status: nil, gitHubState: nil),
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "thinking", path: worktreePath, status: .thinking, gitHubState: gitHubState(state: .merged))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(
+          id: "thinking", path: worktreePath, status: .thinking,
+          gitHubState: gitHubState(state: .merged))
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(
-        id: "approval",
-        path: worktreePath,
-        status: .awaitingApproval(tool: "Bash"),
-        gitHubState: gitHubState(state: .merged)
-      )
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(
+          id: "approval",
+          path: worktreePath,
+          status: .awaitingApproval(tool: "Bash"),
+          gitHubState: gitHubState(state: .merged)
+        )
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "ci-pending", path: worktreePath, gitHubState: gitHubState(state: .merged, ciStatus: .pending))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(
+          id: "ci-pending", path: worktreePath,
+          gitHubState: gitHubState(state: .merged, ciStatus: .pending))
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "ci-failure", path: worktreePath, gitHubState: gitHubState(state: .merged, ciStatus: .failure))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(
+          id: "ci-failure", path: worktreePath,
+          gitHubState: gitHubState(state: .merged, ciStatus: .failure))
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      safeMerged,
-      cleanupItem(id: "open-pr", path: worktreePath, gitHubState: gitHubState(number: 89, state: .open)),
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        safeMerged,
+        cleanupItem(
+          id: "open-pr", path: worktreePath, gitHubState: gitHubState(number: 89, state: .open)),
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(
-        id: "conflicting",
-        path: worktreePath,
-        gitHubState: gitHubState(state: .merged, mergeability: .conflicting)
-      )
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(
+          id: "conflicting",
+          path: worktreePath,
+          gitHubState: gitHubState(state: .merged, mergeability: .conflicting)
+        )
+      ]).isEmpty)
 
-    #expect(GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
-      cleanupItem(id: "main-repo", isWorktree: false, gitHubState: gitHubState(state: .merged))
-    ]).isEmpty)
+    #expect(
+      GlobalSessionCleanupSuggestionBuilder.makeSuggestions(items: [
+        cleanupItem(id: "main-repo", isWorktree: false, gitHubState: gitHubState(state: .merged))
+      ]).isEmpty)
   }
 
   private func item(
@@ -562,9 +659,35 @@ struct GlobalSessionControlPanelTests {
   }
 
   private static func pullRequestReferences(number: Int) -> [GitHubPullRequestURLReference] {
-    [GitHubPullRequestURLReference(
-      urlString: "https://github.com/test/repo/pull/\(number)"
-    )].compactMap { $0 }
+    [
+      GitHubPullRequestURLReference(
+        urlString: "https://github.com/test/repo/pull/\(number)"
+      )
+    ].compactMap { $0 }
+  }
+
+  private func workflowComparison() -> WorkflowSessionComparisonRequest {
+    WorkflowSessionComparisonRequest(
+      id: UUID(uuidString: "24E7ED37-06F1-46C6-B4BB-63A7C09E204E")!,
+      workflowID: "workflow-1",
+      title: "XFA-8123",
+      implementation: WorkflowSessionComparisonTarget(
+        providerKind: .codex,
+        session: CLISession(
+          id: "implementation",
+          projectPath: "/tmp/repo",
+          lastActivityAt: Date(timeIntervalSince1970: 1_000)
+        )
+      ),
+      review: WorkflowSessionComparisonTarget(
+        providerKind: .claude,
+        session: CLISession(
+          id: "review",
+          projectPath: "/tmp/repo",
+          lastActivityAt: Date(timeIntervalSince1970: 1_100)
+        )
+      )
+    )
   }
 
   private func makeDefaults() -> UserDefaults {

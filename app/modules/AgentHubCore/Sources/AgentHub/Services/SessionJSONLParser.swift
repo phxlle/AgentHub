@@ -497,6 +497,17 @@ public struct SessionJSONLParser {
 
     let timeSince = Date().timeIntervalSince(lastActivity.timestamp)
 
+    // Claude's `AskUserQuestion` is an explicit input request. Keep it active
+    // until its tool result is written instead of letting it age into idle or
+    // presenting it as a permission approval.
+    if case .toolUse(let name) = lastActivity.type,
+      SessionInteractiveInputTool.matches(name),
+      result.pendingToolUses.values.contains(where: { $0.toolName == name })
+    {
+      result.currentStatus = .awaitingApproval(tool: name)
+      return
+    }
+
     // Global idle timeout: 5 minutes
     if timeSince > 300 {
       result.currentStatus = .idle

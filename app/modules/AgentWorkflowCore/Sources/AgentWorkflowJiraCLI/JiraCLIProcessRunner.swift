@@ -17,19 +17,29 @@ public protocol JiraCLICommandRunning: Sendable {
 }
 
 public actor JiraCLIProcessRunner: JiraCLICommandRunning {
-  private let executableURL: URL
+  private let executableURL: URL?
   private let argumentPrefix: [String]
 
-  public init(
-    executableURL: URL = URL(fileURLWithPath: "/usr/bin/env"),
-    argumentPrefix: [String] = ["acli"]
-  ) {
+  /// With no executable, `acli` is located on run. Apps launched from the Dock or
+  /// a shortcut get `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, so `/usr/bin/env acli`
+  /// would miss a Homebrew install.
+  public init(executableURL: URL? = nil, argumentPrefix: [String] = []) {
     self.executableURL = executableURL
     self.argumentPrefix = argumentPrefix
   }
 
   public func run(arguments: [String]) async throws -> JiraCLICommandResult {
-    let executableURL = executableURL
+    guard
+      let executableURL = executableURL
+        ?? Self.locateACLI(
+          environmentPATH: ProcessInfo.processInfo.environment["PATH"],
+          homeDirectory: NSHomeDirectory())
+    else {
+      throw JiraTicketReaderError.commandFailed(
+        exitCode: 127,
+        message: "The Atlassian CLI (acli) was not found. Install it with `brew install acli`."
+      )
+    }
     let fullArguments = argumentPrefix + arguments
     return try await Task.detached(priority: .userInitiated) {
       try Self.runSynchronously(
@@ -37,6 +47,36 @@ public actor JiraCLIProcessRunner: JiraCLICommandRunning {
         arguments: fullArguments
       )
     }.value
+  }
+
+  /// Directories searched besides `PATH`, in order.
+  static func standardDirectories(homeDirectory: String) -> [String] {
+    ["/opt/homebrew/bin", "/usr/local/bin", "\(homeDirectory)/.local/bin", "/usr/bin"]
+  }
+
+  static func locateACLI(
+    environmentPATH: String?,
+    homeDirectory: String,
+    isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+  ) -> URL? {
+    let pathDirectories = (environmentPATH ?? "").split(separator: ":").map(String.init)
+    for directory in pathDirectories + standardDirectories(homeDirectory: homeDirectory) {
+      let candidate = (directory as NSString).appendingPathComponent("acli")
+      if isExecutable(candidate) { return URL(fileURLWithPath: candidate) }
+    }
+    return nil
+  }
+
+  /// The child's PATH also gets the standard directories, for anything acli spawns.
+  static func childEnvironment(
+    _ environment: [String: String],
+    homeDirectory: String
+  ) -> [String: String] {
+    var environment = environment
+    let existing = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+    let extra = standardDirectories(homeDirectory: homeDirectory).filter { !existing.contains($0) }
+    environment["PATH"] = (existing + extra).joined(separator: ":")
+    return environment
   }
 
   private nonisolated static func runSynchronously(
@@ -66,6 +106,8 @@ public actor JiraCLIProcessRunner: JiraCLICommandRunning {
     let process = Process()
     process.executableURL = executableURL
     process.arguments = arguments
+    process.environment = childEnvironment(
+      ProcessInfo.processInfo.environment, homeDirectory: NSHomeDirectory())
     process.standardOutput = outputHandle
     process.standardError = errorHandle
     try process.run()

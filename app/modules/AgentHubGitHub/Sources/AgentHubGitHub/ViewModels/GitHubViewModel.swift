@@ -181,6 +181,8 @@ public final class GitHubViewModel {
   private let observationService: (any GitHubPRObservationServiceProtocol)?
   private var currentRepoPath: String?
   private var currentBranchName: String?
+  private var currentSessionID: String?
+  private var currentLinkedPullRequests: [GitHubPullRequestURLReference] = []
   private var prDetailTask: Task<Void, Never>?
   private var issueDetailTask: Task<Void, Never>?
   private var currentBranchObservationTask: Task<Void, Never>?
@@ -212,13 +214,20 @@ public final class GitHubViewModel {
   // MARK: - Setup
 
   /// Initializes the GitHub integration for a repository path
-  public func setup(repoPath: String, branchName: String? = nil) async {
+  public func setup(
+    repoPath: String,
+    branchName: String? = nil,
+    sessionID: String? = nil,
+    linkedPullRequests: [GitHubPullRequestURLReference] = []
+  ) async {
     currentRepoPath = repoPath
     currentBranchName = branchName
+    currentSessionID = sessionID
+    currentLinkedPullRequests = linkedPullRequests
     setupState = .checking
     repoInfo = nil
     stopCurrentBranchObservation()
-    stopSelectedPRObservation()
+    deselectPR()
     currentBranchPR = nil
     currentBranchChecks = []
     currentBranchObservationState = .idle
@@ -247,8 +256,17 @@ public final class GitHubViewModel {
     await startCurrentBranchObservationIfAvailable()
   }
 
-  public func isConfigured(repoPath: String, branchName: String?) -> Bool {
-    currentRepoPath == repoPath && currentBranchName == branchName && setupState != .checking
+  public func isConfigured(
+    repoPath: String,
+    branchName: String?,
+    sessionID: String? = nil,
+    linkedPullRequests: [GitHubPullRequestURLReference] = []
+  ) -> Bool {
+    currentRepoPath == repoPath
+      && currentBranchName == branchName
+      && currentSessionID == sessionID
+      && currentLinkedPullRequests == linkedPullRequests
+      && setupState != .checking
   }
 
   public func loadPanelOverview() async {
@@ -317,11 +335,11 @@ public final class GitHubViewModel {
     filter: GitHubPRFilter
   ) -> [GitHubPullRequest] {
     switch filter {
-    case .draft:  return prs.filter { $0.stateKind == .open && $0.isDraft }
-    case .open:   return prs.filter { $0.stateKind == .open && !$0.isDraft }
+    case .draft: return prs.filter { $0.stateKind == .open && $0.isDraft }
+    case .open: return prs.filter { $0.stateKind == .open && !$0.isDraft }
     case .merged: return prs.filter { $0.stateKind == .merged }
     case .closed: return prs.filter { $0.stateKind == .closed }
-    case .all:    return prs
+    case .all: return prs
     }
   }
 
@@ -373,8 +391,9 @@ public final class GitHubViewModel {
   /// Loads repository labels if not already loaded
   public func loadLabelsIfNeeded() async {
     guard let repoPath = currentRepoPath,
-          availableLabels.isEmpty,
-          labelsLoadingState != .loading else { return }
+      availableLabels.isEmpty,
+      labelsLoadingState != .loading
+    else { return }
     labelsLoadingState = .loading
     do {
       availableLabels = try await service.listLabels(at: repoPath)
@@ -439,20 +458,65 @@ public final class GitHubViewModel {
     }
 
     do {
-      currentBranchPR = try await service.getCurrentBranchPR(
-        branchName: currentBranchName,
-        at: repoPath
-      )
+      if let preferredPullRequestNumber {
+        currentBranchPR = try await service.getPullRequest(
+          number: preferredPullRequestNumber,
+          at: repoPath
+        )
+      } else {
+        currentBranchPR = try await service.getCurrentBranchPR(
+          branchName: currentBranchName,
+          at: repoPath
+        )
+      }
     } catch {
       GitHubLogger.github.info("No PR for current branch: \(error.localizedDescription)")
+    }
+  }
+
+  /// Opens the pull request explicitly linked to the active session. Session
+  /// evidence is authoritative; branch discovery is only a fallback.
+  public func focusPreferredPullRequestIfAvailable() async {
+    guard let repoPath = currentRepoPath,
+      let preferredPullRequestNumber,
+      selectedPR?.number != preferredPullRequestNumber
+    else {
+      return
+    }
+
+    do {
+      let pullRequest: GitHubPullRequest
+      if currentBranchPR?.number == preferredPullRequestNumber,
+        let currentBranchPR
+      {
+        pullRequest = currentBranchPR
+      } else {
+        pullRequest = try await service.getPullRequest(
+          number: preferredPullRequestNumber,
+          at: repoPath
+        )
+      }
+      guard currentRepoPath == repoPath,
+        self.preferredPullRequestNumber == preferredPullRequestNumber
+      else {
+        return
+      }
+      currentBranchPR = pullRequest
+      replaceLoadedPullRequest(pullRequest)
+      selectPR(pullRequest)
+    } catch {
+      GitHubLogger.github.warning(
+        "Failed to load linked PR #\(preferredPullRequestNumber): \(error.localizedDescription)"
+      )
     }
   }
 
   /// Submits a comment on the selected PR
   public func submitPRComment() async {
     guard let repoPath = currentRepoPath,
-          let pr = selectedPR,
-          !newCommentText.isEmpty else { return }
+      let pr = selectedPR,
+      !newCommentText.isEmpty
+    else { return }
 
     isSubmittingComment = true
     defer { isSubmittingComment = false }
@@ -470,7 +534,8 @@ public final class GitHubViewModel {
   /// Submits a review on the selected PR
   public func submitReview(event: GitHubReviewInput.Event) async {
     guard let repoPath = currentRepoPath,
-          let pr = selectedPR else { return }
+      let pr = selectedPR
+    else { return }
 
     isSubmittingReview = true
     defer { isSubmittingReview = false }
@@ -584,11 +649,15 @@ public final class GitHubViewModel {
 
     do {
       let issue = try await service.getIssue(number: number, at: repoPath)
-      guard !Task.isCancelled, selectedIssue == nil || selectedIssue?.number == number else { return }
+      guard !Task.isCancelled, selectedIssue == nil || selectedIssue?.number == number else {
+        return
+      }
       selectedIssue = issue
       issueDetailLoadingState = .loaded
     } catch {
-      guard !Task.isCancelled, selectedIssue == nil || selectedIssue?.number == number else { return }
+      guard !Task.isCancelled, selectedIssue == nil || selectedIssue?.number == number else {
+        return
+      }
       issueDetailLoadingState = .error(error.localizedDescription)
       GitHubLogger.github.error("Failed to load issue: \(error.localizedDescription)")
     }
@@ -597,14 +666,16 @@ public final class GitHubViewModel {
   /// Submits a comment on the selected issue
   public func submitIssueComment() async {
     guard let repoPath = currentRepoPath,
-          let issue = selectedIssue,
-          !newCommentText.isEmpty else { return }
+      let issue = selectedIssue,
+      !newCommentText.isEmpty
+    else { return }
 
     isSubmittingComment = true
     defer { isSubmittingComment = false }
 
     do {
-      try await service.addIssueComment(issueNumber: issue.number, body: newCommentText, at: repoPath)
+      try await service.addIssueComment(
+        issueNumber: issue.number, body: newCommentText, at: repoPath)
       newCommentText = ""
       await loadIssueDetail(number: issue.number)
     } catch {
@@ -702,7 +773,7 @@ public final class GitHubViewModel {
     let target = GitHubPRObservationTarget.session(
       projectPath: repoPath,
       branchName: currentBranchName,
-      linkedPullRequests: []
+      linkedPullRequests: currentLinkedPullRequests
     )
     let subscription = await observationService.subscribe(to: target)
     currentBranchSubscriptionID = subscription.id
@@ -720,7 +791,7 @@ public final class GitHubViewModel {
     let target = GitHubPRObservationTarget.session(
       projectPath: repoPath,
       branchName: currentBranchName,
-      linkedPullRequests: []
+      linkedPullRequests: currentLinkedPullRequests
     )
     await observationService.recordActivity(for: target, at: .now)
     await observationService.refresh(target)
@@ -804,6 +875,15 @@ public final class GitHubViewModel {
       return
     }
     pullRequests[index] = pullRequest
+  }
+
+  private var preferredPullRequestNumber: Int? {
+    guard let repoInfo else { return nil }
+    let identity = GitHubRepositoryIdentity(owner: repoInfo.owner, repository: repoInfo.name)
+    return GitHubPullRequestURLReference.latest(
+      matching: identity,
+      in: currentLinkedPullRequests
+    )?.number
   }
 
   private func loadingState(from observationState: GitHubPRObservationState) -> GitHubLoadingState {

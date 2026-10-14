@@ -285,6 +285,7 @@ struct CLICommandConfigurationArgumentHandlingTests {
 
     // Wrapper detection is structural (executable != native provider CLI), not a hardcoded name.
     #expect(Array(args.prefix(4)) == ["claude", "--api-mode", "enterprise", "--"])
+    #expect(Array(args.suffix(2)) == ["--", "Start work"])
     #expect(args.last == "Start work")
   }
 
@@ -301,8 +302,7 @@ struct CLICommandConfigurationArgumentHandlingTests {
       prompt: "Start work"
     )
 
-    #expect(!args.contains("--"))
-    #expect(Array(args.suffix(2)) == ["--debug", "Start work"])
+    #expect(Array(args.suffix(3)) == ["--debug", "--", "Start work"])
   }
 
   @Test("Direct CLI keeps extra args before prompt")
@@ -318,7 +318,34 @@ struct CLICommandConfigurationArgumentHandlingTests {
       prompt: "Start work"
     )
 
-    #expect(Array(args.suffix(2)) == ["--debug", "Start work"])
+    #expect(Array(args.suffix(3)) == ["--debug", "--", "Start work"])
+  }
+
+  @Test("Claude MCP config is terminated before a positional prompt")
+  func claudeMCPConfigStopsBeforePrompt() throws {
+    let args = CLICommandConfiguration.claudeDefault.argumentsForSession(
+      sessionId: nil,
+      prompt: String(repeating: "Review the implementation carefully. ", count: 100),
+      agentHubMCPServerPath: "/Applications/AgentHub.app/Contents/Helpers/agenthub"
+    )
+
+    let configIndex = try #require(args.firstIndex(of: "--mcp-config"))
+    let separatorIndex = try #require(args.lastIndex(of: "--"))
+    #expect(separatorIndex + 1 == args.index(before: args.endIndex))
+    #expect(configIndex < separatorIndex)
+    #expect(args[separatorIndex + 1].hasPrefix("Review the implementation"))
+  }
+
+  @Test("Claude resume prompt is separated from variadic options")
+  func claudeResumePromptUsesOptionSeparator() {
+    let args = CLICommandConfiguration.claudeDefault.argumentsForSession(
+      sessionId: "session-123",
+      prompt: "Review the latest changes",
+      agentHubMCPServerPath: "/Applications/AgentHub.app/Contents/Helpers/agenthub"
+    )
+
+    #expect(Array(args.suffix(2)) == ["--", "Review the latest changes"])
+    #expect(args.firstIndex(of: "-r") != nil)
   }
 
   @Test("Claude sessions receive the appended system prompt on launch and on resume")

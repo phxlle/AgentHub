@@ -10,6 +10,7 @@ public struct SessionWorkspaceState: Codable, Equatable, Sendable {
   public var selectedRepositoryPaths: [String]
   public var selectedFolderPaths: [String]
   public var monitoredSessionIds: [String]
+  public var archivedSessionIds: [String]
   public var ownedWorktreePaths: [String]
   public var expansionState: [String: Bool]
 
@@ -17,12 +18,14 @@ public struct SessionWorkspaceState: Codable, Equatable, Sendable {
     selectedRepositoryPaths: [String] = [],
     selectedFolderPaths: [String] = [],
     monitoredSessionIds: [String] = [],
+    archivedSessionIds: [String] = [],
     ownedWorktreePaths: [String] = [],
     expansionState: [String: Bool] = [:]
   ) {
     self.selectedRepositoryPaths = selectedRepositoryPaths
     self.selectedFolderPaths = selectedFolderPaths
     self.monitoredSessionIds = monitoredSessionIds
+    self.archivedSessionIds = archivedSessionIds
     self.ownedWorktreePaths = ownedWorktreePaths
     self.expansionState = expansionState
   }

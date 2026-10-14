@@ -20,6 +20,7 @@ public struct SettingsView: View {
   @State private var pendingTerminalBackend: EmbeddedTerminalBackend?
   @State private var showTerminalBackendRelaunchAlert = false
   @State private var cliEnvironmentVariables = CLIEnvironmentOverrides.variables
+  @State private var githubPromptLibrary = GitHubPromptLibrary.shared
 
   @AppStorage(AgentHubDefaults.smartModeEnabled)
   private var smartModeEnabled: Bool = false
@@ -150,6 +151,11 @@ public struct SettingsView: View {
       configurationSettingsForm
         .tabItem {
           Label("Configuration", systemImage: "sparkles")
+        }
+
+      GitHubPromptSettingsView(library: githubPromptLibrary)
+        .tabItem {
+          Label("Prompts", systemImage: "text.badge.plus")
         }
 
       WorktreeSettingsView()

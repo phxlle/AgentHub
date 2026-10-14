@@ -14,6 +14,7 @@ struct SessionWorkspaceStatePersistenceTests {
       selectedRepositoryPaths: ["/tmp/project-a", "/tmp/project-b"],
       selectedFolderPaths: ["/tmp"],
       monitoredSessionIds: ["session-1", "session-2"],
+      archivedSessionIds: ["session-archived"],
       ownedWorktreePaths: ["/tmp/project-a/worktrees/feature"],
       expansionState: [
         "repo:/tmp/project-a": true,
@@ -74,6 +75,44 @@ struct SessionWorkspaceStatePersistenceTests {
           expansionState: ["repo:/tmp/project": true]
         )
     )
+  }
+
+  @Test("Fork database that applied folder/review migrations first still gets upstream v14-v18")
+  func forkLineageDatabaseGetsUpstreamMigrations() async throws {
+    let path = temporaryWorkspaceStateDatabasePath()
+    let state = SessionWorkspaceState(
+      selectedRepositoryPaths: ["/tmp/project"],
+      selectedFolderPaths: ["/tmp"],
+      monitoredSessionIds: ["session-1"]
+    )
+    try await SessionMetadataStore(path: path).saveWorkspaceState(state, for: .claude)
+
+    // Rewind to the pre-rebase fork lineage: fork migrations applied, upstream's
+    // v14-v18 (registered before them) never ran.
+    let upstreamOnly: [(id: String, table: String?)] = [
+      (SessionMetadataStore.MigrationID.createSessionMeasurements, "session_measurements"),
+      (SessionMetadataStore.MigrationID.addMeasurementProjectPath, nil),
+      (SessionMetadataStore.MigrationID.createContextProfiles, "context_profiles"),
+      (SessionMetadataStore.MigrationID.createSessionLaunchContext, "session_launch_context"),
+      (SessionMetadataStore.MigrationID.createStudioArtifacts, "studio_artifacts"),
+    ]
+    let dbQueue = try DatabaseQueue(path: path)
+    try await dbQueue.write { db in
+      for migration in upstreamOnly {
+        if let table = migration.table { try db.drop(table: table) }
+        try db.execute(
+          sql: "DELETE FROM grdb_migrations WHERE identifier = ?", arguments: [migration.id])
+      }
+    }
+    try dbQueue.close()
+
+    let store = try SessionMetadataStore(path: path)
+    #expect(store.getWorkspaceStateSync(for: .claude) == state)
+    let tables = try await DatabaseQueue(path: path).read { db in
+      try ["session_measurements", "context_profiles", "session_launch_context", "studio_artifacts"]
+        .filter { try db.tableExists($0) }
+    }
+    #expect(tables.count == 4)
   }
 
   @Test("Clear all removes workspace state")

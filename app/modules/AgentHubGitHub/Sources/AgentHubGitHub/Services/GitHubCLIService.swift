@@ -5,6 +5,7 @@
 //  Service for interacting with GitHub via the gh CLI
 //
 
+import Darwin
 import Foundation
 
 // MARK: - Errors
@@ -68,7 +69,7 @@ public actor GitHubCLIService {
       "/opt/homebrew/bin/gh",
       "/usr/local/bin/gh",
       "/usr/bin/gh",
-      "\(NSHomeDirectory())/.local/bin/gh"
+      "\(NSHomeDirectory())/.local/bin/gh",
     ]
 
     for path in searchPaths {
@@ -154,10 +155,13 @@ public actor GitHubCLIService {
     authoredByMe: Bool = false,
     labels: [String] = []
   ) async throws -> [GitHubPullRequest] {
-    let fields = "number,title,body,state,url,headRefName,headRefOid,baseRefName,author,createdAt,updatedAt,isDraft,mergeable,additions,deletions,changedFiles,reviewDecision,statusCheckRollup,labels,reviewRequests"
+    let fields =
+      "number,title,body,state,url,headRefName,headRefOid,baseRefName,author,createdAt,updatedAt,isDraft,mergeable,additions,deletions,changedFiles,reviewDecision,statusCheckRollup,labels,reviewRequests"
 
     let effectiveLimit = authoredByMe ? 200 : limit
-    GitHubLogger.github.debug("[PR list] fetching state=\(state) limit=\(effectiveLimit) authoredByMe=\(authoredByMe) labels=\(labels) repoPath=\(repoPath)")
+    GitHubLogger.github.debug(
+      "[PR list] fetching state=\(state) limit=\(effectiveLimit) authoredByMe=\(authoredByMe) labels=\(labels) repoPath=\(repoPath)"
+    )
     var args = ["pr", "list", "--state", state, "--limit", "\(effectiveLimit)", "--json", fields]
     if authoredByMe { args += ["--author", "@me"] }
     for label in labels { args += ["--label", label] }
@@ -200,7 +204,8 @@ public actor GitHubCLIService {
     number: Int,
     at repoPath: String
   ) async throws -> GitHubPullRequest {
-    let fields = "number,title,body,state,url,headRefName,headRefOid,baseRefName,author,createdAt,updatedAt,isDraft,mergeable,additions,deletions,changedFiles,reviewDecision,statusCheckRollup,labels,reviewRequests"
+    let fields =
+      "number,title,body,state,url,headRefName,headRefOid,baseRefName,author,createdAt,updatedAt,isDraft,mergeable,additions,deletions,changedFiles,reviewDecision,statusCheckRollup,labels,reviewRequests"
 
     let json = try await runGH(
       ["pr", "view", "\(number)", "--json", fields],
@@ -215,7 +220,8 @@ public actor GitHubCLIService {
     branchName: String?,
     at repoPath: String
   ) async throws -> GitHubPullRequest? {
-    let fields = "number,title,body,state,url,headRefName,headRefOid,baseRefName,author,createdAt,updatedAt,isDraft,mergeable,additions,deletions,changedFiles,reviewDecision,statusCheckRollup,labels,reviewRequests"
+    let fields =
+      "number,title,body,state,url,headRefName,headRefOid,baseRefName,author,createdAt,updatedAt,isDraft,mergeable,additions,deletions,changedFiles,reviewDecision,statusCheckRollup,labels,reviewRequests"
     var arguments = ["pr", "view"]
     if let branchName, !branchName.isEmpty {
       arguments.append(branchName)
@@ -290,7 +296,7 @@ public actor GitHubCLIService {
       "--title", input.title,
       "--body", input.body,
       "--base", input.baseBranch,
-      "--head", input.headBranch
+      "--head", input.headBranch,
     ]
 
     if input.isDraft {
@@ -572,34 +578,44 @@ public actor GitHubCLIService {
       readGroup.leave()
     }
 
-    let didTimeout = await withTaskGroup(of: Bool.self) { group in
-      group.addTask {
-        await withCheckedContinuation { continuation in
-          DispatchQueue.global().async {
-            readGroup.wait()
-            process.waitUntilExit()
-            continuation.resume(returning: false)
+    // Do not race a blocking process waiter and a timeout inside a task group. A
+    // cancelled task-group child that is blocked in `waitUntilExit()` still has
+    // to finish before the group can return. If `gh` does not exit after SIGTERM,
+    // that turns the intended timeout into an infinite wait.
+    let didTimeout = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+          let deadline = Date().addingTimeInterval(timeout)
+          while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
           }
-        }
-      }
 
-      group.addTask {
-        do {
-          try await Task.sleep(for: .seconds(timeout))
-          if process.isRunning {
+          let timedOut = process.isRunning
+          if timedOut {
             GitHubLogger.github.warning("gh command timed out after \(timeout)s, terminating")
             process.terminate()
+
+            let terminationDeadline = Date().addingTimeInterval(1)
+            while process.isRunning, Date() < terminationDeadline {
+              Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+              Darwin.kill(process.processIdentifier, SIGKILL)
+            }
           }
-          return true
-        } catch {
-          return false
+
+          process.waitUntilExit()
+          readGroup.wait()
+          continuation.resume(returning: timedOut)
         }
       }
-
-      let result = await group.next() ?? false
-      group.cancelAll()
-      return result
+    } onCancel: {
+      if process.isRunning {
+        process.terminate()
+      }
     }
+
+    try Task.checkCancellation()
 
     let output = String(data: outputData ?? Data(), encoding: .utf8) ?? ""
     let errorOutput = String(data: errorData ?? Data(), encoding: .utf8) ?? ""
@@ -615,9 +631,13 @@ public actor GitHubCLIService {
       let errMsg = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
       let exitCode = process.terminationStatus
       if Self.shouldLogFailureQuietly(errMsg, quietFailureMessages: quietFailureMessages) {
-        GitHubLogger.github.debug("[runCommand] EXPECTED_FAILURE in \(cmdElapsed)s exitCode=\(exitCode) stderr=\(errMsg) cmd=\(cmdDescription)")
+        GitHubLogger.github.debug(
+          "[runCommand] EXPECTED_FAILURE in \(cmdElapsed)s exitCode=\(exitCode) stderr=\(errMsg) cmd=\(cmdDescription)"
+        )
       } else {
-        GitHubLogger.github.error("[runCommand] FAILED in \(cmdElapsed)s exitCode=\(exitCode) stderr=\(errMsg) cmd=\(cmdDescription)")
+        GitHubLogger.github.error(
+          "[runCommand] FAILED in \(cmdElapsed)s exitCode=\(exitCode) stderr=\(errMsg) cmd=\(cmdDescription)"
+        )
       }
 
       if errMsg.contains("not logged") || errMsg.contains("auth login") {
@@ -633,7 +653,8 @@ public actor GitHubCLIService {
       throw GitHubCLIError.commandFailed(errMsg)
     }
 
-    GitHubLogger.github.debug("[runCommand] OK in \(cmdElapsed)s stdout=\(outputBytes) bytes cmd=\(cmdDescription)")
+    GitHubLogger.github.debug(
+      "[runCommand] OK in \(cmdElapsed)s stdout=\(outputBytes) bytes cmd=\(cmdDescription)")
     return output
   }
 
@@ -763,7 +784,9 @@ public actor GitHubCLIService {
   static func parsePRFiles(_ json: String, fallbackFilenames: [String]) throws -> [GitHubPRFile] {
     guard let data = json.data(using: .utf8) else {
       // Fallback to just filenames
-      return fallbackFilenames.map { GitHubPRFile(filename: $0, status: "modified", additions: 0, deletions: 0, patch: nil) }
+      return fallbackFilenames.map {
+        GitHubPRFile(filename: $0, status: "modified", additions: 0, deletions: 0, patch: nil)
+      }
     }
 
     struct RawFile: Decodable {
@@ -790,7 +813,9 @@ public actor GitHubCLIService {
       }
     } catch {
       // Fallback to filenames only
-      return fallbackFilenames.map { GitHubPRFile(filename: $0, status: "modified", additions: 0, deletions: 0, patch: nil) }
+      return fallbackFilenames.map {
+        GitHubPRFile(filename: $0, status: "modified", additions: 0, deletions: 0, patch: nil)
+      }
     }
   }
 

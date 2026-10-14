@@ -37,6 +37,8 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     // v14-v18 landed. Keeps its original identifier so databases that already
     // applied it are not migrated twice; registered after upstream's migrations.
     static let addSelectedFolderPaths = "v14_add_selected_folder_paths"
+    static let createGitHubReviewSessions = "v15_create_github_review_sessions"
+    static let addArchivedSessionIds = "v16_add_archived_session_ids"
   }
 
   static let migrationIdentifiers = [
@@ -58,7 +60,9 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     MigrationID.createContextProfiles,
     MigrationID.createSessionLaunchContext,
     MigrationID.createStudioArtifacts,
-    MigrationID.addSelectedFolderPaths
+    MigrationID.addSelectedFolderPaths,
+    MigrationID.createGitHubReviewSessions,
+    MigrationID.addArchivedSessionIds
   ]
 
   private let dbQueue: DatabaseQueue
@@ -378,6 +382,31 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
     migrator.registerMigration(MigrationID.addSelectedFolderPaths) { db in
       try db.alter(table: "session_workspace_state") { t in
         t.add(column: "selectedFolderPathsData", .blob)
+      }
+    }
+
+    migrator.registerMigration(MigrationID.createGitHubReviewSessions) { db in
+      try db.create(table: "github_review_sessions") { t in
+        t.column("pullRequestID", .text).notNull()
+        t.column("pullRequestURL", .text).notNull()
+        t.column("provider", .text).notNull()
+        t.column("pendingID", .text)
+        t.column("sessionID", .text)
+        t.column("projectPath", .text).notNull()
+        t.column("createdAt", .datetime).notNull()
+        t.column("updatedAt", .datetime).notNull()
+        t.primaryKey(["pullRequestID", "provider"], onConflict: .replace)
+      }
+      try db.create(
+        index: "idx_github_review_sessions_session",
+        on: "github_review_sessions",
+        columns: ["provider", "sessionID"]
+      )
+    }
+
+    migrator.registerMigration(MigrationID.addArchivedSessionIds) { db in
+      try db.alter(table: "session_workspace_state") { t in
+        t.add(column: "archivedSessionIdsData", .blob)
       }
     }
 
@@ -758,6 +787,32 @@ public actor SessionMetadataStore: TerminalWorkspaceStoreProtocol, AgentWorkspac
         .filter(Column("workspaceId") == id)
         .deleteAll(db)
       _ = try AgentWorkspaceRecord.deleteOne(db, key: id)
+    }
+  }
+}
+
+extension SessionMetadataStore: GitHubReviewSessionStoreProtocol {
+  func saveGitHubReviewSessionAssociation(
+    _ association: GitHubReviewSessionAssociation
+  ) async throws {
+    try await dbQueue.write { db in
+      var record = association
+      record.updatedAt = .now
+      if let existing = try GitHubReviewSessionAssociation.fetchOne(
+        db,
+        key: ["pullRequestID": record.pullRequestID, "provider": record.provider]
+      ) {
+        record.createdAt = existing.createdAt
+      }
+      try record.save(db)
+    }
+  }
+
+  func githubReviewSessionAssociations() async throws -> [GitHubReviewSessionAssociation] {
+    try await dbQueue.read { db in
+      try GitHubReviewSessionAssociation
+        .order(Column("updatedAt").desc)
+        .fetchAll(db)
     }
   }
 }

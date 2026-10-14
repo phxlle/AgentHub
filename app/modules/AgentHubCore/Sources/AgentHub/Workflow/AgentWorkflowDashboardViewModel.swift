@@ -60,6 +60,7 @@ public final class AgentWorkflowDashboardViewModel {
   private struct PendingManualSessionLaunch {
     let workflowID: String
     let provider: SessionProviderKind
+    let role: DetectedAgentRole
     let repositoryPath: String
     let existingSessionIDs: Set<String>
     let startedAt: Date
@@ -135,6 +136,19 @@ public final class AgentWorkflowDashboardViewModel {
 
   var displayedWorkflows: [DetectedTicketWorkflow] {
     AgentSessionWorkflowClassifier.workflows(from: detectedBranches, scope: workflowScope)
+  }
+
+  var activeWorkflowDestinations: [SessionWorkflowDestination] {
+    AgentSessionWorkflowClassifier.workflows(from: detectedBranches, scope: .active)
+      .map { workflow in
+        SessionWorkflowDestination(
+          id: workflow.id,
+          title: workflow.ticketKey ?? workflow.summary ?? "Unassigned sessions"
+        )
+      }
+      .sorted {
+        $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+      }
   }
 
   var activeWorkflowCount: Int {
@@ -284,6 +298,7 @@ public final class AgentWorkflowDashboardViewModel {
     capturePendingManualSessionLaunches(in: allObservations)
     captureAutomatedReviewerSessions(in: allObservations)
     synchronizeAnalyzedObservations(with: allObservations)
+    prioritySessionIDs.formUnion(knownWorkflowSessionIDs)
     totalSessionCount = allObservations.count
 
     if forcePullRequestRefresh {
@@ -299,6 +314,9 @@ public final class AgentWorkflowDashboardViewModel {
     let unprocessedObservations = allObservations.filter {
       analyzedObservations[observationID($0)] == nil
     }
+    let priorityObservationCount = unprocessedObservations.count {
+      prioritySessionIDs.contains(observationID($0))
+    }
     let batch = Array(
       unprocessedObservations
         .sorted { lhs, rhs in
@@ -308,9 +326,9 @@ public final class AgentWorkflowDashboardViewModel {
           return analysisObservationSort(lhs, rhs)
         }
         .prefix(
-          min(
-            Self.sessionAnalysisBatchSize,
-            max(requestedBatchCount, prioritySessionIDs.count)
+          max(
+            min(Self.sessionAnalysisBatchSize, requestedBatchCount),
+            priorityObservationCount
           )
         )
     )
@@ -368,6 +386,20 @@ public final class AgentWorkflowDashboardViewModel {
     await refreshDetectedWorkflows()
   }
 
+  private var knownWorkflowSessionIDs: Set<String> {
+    var result = Set(manualState.sessionAssignments.keys)
+    for review in manualState.automatedReviews.values {
+      result.insert(review.implementerSessionID)
+      if let reviewerSessionID = review.reviewerSessionID {
+        result.insert(reviewerSessionID)
+      }
+    }
+    for branch in detectedBranches {
+      result.formUnion((branch.implementerSessions + branch.reviewerSessions).map(\.id))
+    }
+    return result
+  }
+
   @discardableResult
   func createManualWorkflow(
     name: String,
@@ -395,11 +427,42 @@ public final class AgentWorkflowDashboardViewModel {
     return definition.workflowID
   }
 
+  @discardableResult
+  func createManualWorkflowAndMoveSession(
+    name: String,
+    repositoryPath: String,
+    branchName: String?,
+    sessionID: String
+  ) async -> String? {
+    let observation = sessionObservations().first { observationID($0) == sessionID }
+    let resolvedRepositoryPath = observation?.repositoryPath ?? repositoryPath
+    let resolvedBranchName = observation?.branchName ?? branchName
+    guard
+      let workflowID = createManualWorkflow(
+        name: name,
+        repositoryPath: resolvedRepositoryPath,
+        branchName: resolvedBranchName
+      )
+    else {
+      return nil
+    }
+    await moveSession(sessionID, to: workflowID)
+    return workflowID
+  }
+
   func deleteManualWorkflow(_ workflowID: String) {
+    let removedSessionIDs = Set(
+      manualState.sessionAssignments.compactMap { sessionID, assignedWorkflowID in
+        assignedWorkflowID == workflowID ? sessionID : nil
+      }
+    )
     manualState.workflows.removeAll { $0.workflowID == workflowID }
     manualState.archivedWorkflowIDs.remove(workflowID)
     manualState.sessionAssignments = manualState.sessionAssignments.filter {
       $0.value != workflowID
+    }
+    manualState.sessionRoleOverrides = manualState.sessionRoleOverrides.filter {
+      !removedSessionIDs.contains($0.key)
     }
     manualState.automatedReviews = manualState.automatedReviews.filter {
       $0.value.workflowID != workflowID
@@ -457,6 +520,7 @@ public final class AgentWorkflowDashboardViewModel {
 
   func removeSessionWorkflowOverride(_ sessionID: String) {
     guard manualState.sessionAssignments.removeValue(forKey: sessionID) != nil else { return }
+    manualState.sessionRoleOverrides.removeValue(forKey: sessionID)
     persistManualState()
     applyManualWorkflowProjection()
     repairDetectedSelection()
@@ -464,6 +528,95 @@ public final class AgentWorkflowDashboardViewModel {
 
   func hasSessionWorkflowOverride(_ sessionID: String) -> Bool {
     manualState.sessionAssignments[sessionID] != nil
+  }
+
+  func workflowID(containing sessionID: String) -> String? {
+    if let assignedWorkflowID = manualState.sessionAssignments[sessionID] {
+      return assignedWorkflowID
+    }
+    return AgentSessionWorkflowClassifier.workflows(from: detectedBranches, scope: .active)
+      .first { workflow in
+        workflow.branches.contains { branch in
+          (branch.implementerSessions + branch.reviewerSessions).contains { $0.id == sessionID }
+        }
+      }?
+      .id
+  }
+
+  func workflowAssociation(for sessionID: String) -> SessionWorkflowAssociation? {
+    for workflow in allProjectedWorkflows {
+      for branch in workflow.branches {
+        if branch.implementerSessions.contains(where: { $0.id == sessionID }) {
+          return SessionWorkflowAssociation(
+            workflowID: workflow.id,
+            title: workflowDisplayTitle(workflow),
+            role: .implementer,
+            comparisonRequest: comparisonRequest(for: branch, workflow: workflow)
+          )
+        }
+        if branch.reviewerSessions.contains(where: { $0.id == sessionID }) {
+          return SessionWorkflowAssociation(
+            workflowID: workflow.id,
+            title: workflowDisplayTitle(workflow),
+            role: .reviewer,
+            comparisonRequest: comparisonRequest(for: branch, workflow: workflow)
+          )
+        }
+      }
+    }
+    return nil
+  }
+
+  func comparisonRequest(for branchID: String) -> WorkflowSessionComparisonRequest? {
+    for workflow in allProjectedWorkflows {
+      guard let branch = workflow.branches.first(where: { $0.id == branchID }) else { continue }
+      return comparisonRequest(for: branch, workflow: workflow)
+    }
+    return nil
+  }
+
+  func displayName(for assignment: DetectedAgentSession) -> String {
+    switch assignment.provider {
+    case .claude:
+      return claudeSessionsViewModel?.displayName(for: assignment.session)
+        ?? assignment.session.displayName
+    case .codex:
+      return codexSessionsViewModel?.displayName(for: assignment.session)
+        ?? assignment.session.displayName
+    }
+  }
+
+  private var allProjectedWorkflows: [DetectedTicketWorkflow] {
+    AgentSessionWorkflowClassifier.workflows(from: detectedBranches, scope: .active)
+      + AgentSessionWorkflowClassifier.workflows(from: detectedBranches, scope: .completed)
+  }
+
+  private func workflowDisplayTitle(_ workflow: DetectedTicketWorkflow) -> String {
+    workflow.ticketKey ?? workflow.summary ?? "Workflow"
+  }
+
+  private func comparisonRequest(
+    for branch: DetectedBranchWorkflow,
+    workflow: DetectedTicketWorkflow
+  ) -> WorkflowSessionComparisonRequest? {
+    guard let implementer = branch.primaryImplementer,
+      let reviewer = branch.primaryReviewer,
+      implementer.id != reviewer.id
+    else {
+      return nil
+    }
+    return WorkflowSessionComparisonRequest(
+      workflowID: workflow.id,
+      title: workflowDisplayTitle(workflow),
+      implementation: WorkflowSessionComparisonTarget(
+        providerKind: implementer.provider,
+        session: implementer.session
+      ),
+      review: WorkflowSessionComparisonTarget(
+        providerKind: reviewer.provider,
+        session: reviewer.session
+      )
+    )
   }
 
   func retryAutomatedReview(for branchID: String) {
@@ -519,6 +672,9 @@ public final class AgentWorkflowDashboardViewModel {
     manualState.sessionAssignments = manualState.sessionAssignments.filter {
       !sessionIDs.contains($0.key)
     }
+    manualState.sessionRoleOverrides = manualState.sessionRoleOverrides.filter {
+      !sessionIDs.contains($0.key)
+    }
     for record in manualState.automatedReviews.values
     where sessionIDs.contains(record.implementerSessionID)
       || sessionIDs.contains(record.reviewerSessionID ?? "")
@@ -543,7 +699,8 @@ public final class AgentWorkflowDashboardViewModel {
 
   func prepareManualSessionLaunch(
     workflowID: String,
-    provider: SessionProviderKind
+    provider: SessionProviderKind,
+    role: DetectedAgentRole = .implementer
   ) -> ManualWorkflowDefinition? {
     guard let workflow = manualState.workflows.first(where: { $0.workflowID == workflowID }) else {
       return nil
@@ -557,6 +714,7 @@ public final class AgentWorkflowDashboardViewModel {
       PendingManualSessionLaunch(
         workflowID: workflowID,
         provider: provider,
+        role: role,
         repositoryPath: workflow.repositoryPath,
         existingSessionIDs: existingSessionIDs,
         startedAt: Date(),
@@ -798,6 +956,7 @@ public final class AgentWorkflowDashboardViewModel {
       }
       let id = observationID(candidate)
       manualState.sessionAssignments[id] = launch.workflowID
+      manualState.sessionRoleOverrides[id] = launch.role
       prioritySessionIDs.insert(id)
       claimedSessionIDs.insert(id)
       didChangeState = true
@@ -873,6 +1032,11 @@ public final class AgentWorkflowDashboardViewModel {
 
   private func advanceAutomatedReviews() {
     var didChangeState = false
+    let eligibleBranchIDs = Set(
+      AgentSessionWorkflowClassifier.workflows(from: detectedBranches, scope: .active)
+        .flatMap(\.branches)
+        .map(\.id)
+    )
 
     for branch in detectedBranches where !branch.isCompleted {
       if var record = manualState.automatedReviews[branch.id] {
@@ -916,7 +1080,8 @@ public final class AgentWorkflowDashboardViewModel {
         continue
       }
 
-      guard manualState.automatedReviews[branch.id] == nil,
+      guard eligibleBranchIDs.contains(branch.id),
+        manualState.automatedReviews[branch.id] == nil,
         let implementer = branch.primaryImplementer,
         implementer.session.isActive
       else {
@@ -1174,7 +1339,9 @@ public final class AgentWorkflowDashboardViewModel {
       persistManualState()
     }
 
-    var projectedBranches = classifiedBranches
+    var projectedBranches = applyingAutomatedReviewRoles(
+      to: applyingManualRoleOverrides(to: classifiedBranches)
+    )
     var movedSessions: [String: [DetectedAgentSession]] = [:]
 
     for index in projectedBranches.indices {
@@ -1225,6 +1392,79 @@ public final class AgentWorkflowDashboardViewModel {
       var branch = branch
       branch.automatedReview = manualState.automatedReviews[branch.id]
       branch.isArchived = manualState.archivedWorkflowIDs.contains(workflowID(for: branch))
+      return branch
+    }
+  }
+
+  private func applyingAutomatedReviewRoles(
+    to branches: [DetectedBranchWorkflow]
+  ) -> [DetectedBranchWorkflow] {
+    let reviewerIDs = Set(manualState.automatedReviews.values.compactMap(\.reviewerSessionID))
+    let implementerIDs = Set(manualState.automatedReviews.values.map(\.implementerSessionID))
+    guard !reviewerIDs.isEmpty || !implementerIDs.isEmpty else { return branches }
+
+    return branches.map { branch in
+      var branch = branch
+      let assignments = branch.implementerSessions + branch.reviewerSessions
+      var seenIDs = Set<String>()
+      branch.implementerSessions = []
+      branch.reviewerSessions = []
+
+      for assignment in assignments where seenIDs.insert(assignment.id).inserted {
+        let adjusted: DetectedAgentSession
+        if reviewerIDs.contains(assignment.id) {
+          adjusted = DetectedAgentSession(
+            session: assignment.session,
+            provider: assignment.provider,
+            role: .reviewer,
+            roleConfidence: .high,
+            roleReason: "Started by AgentHub as the independent reviewer"
+          )
+        } else if implementerIDs.contains(assignment.id) {
+          adjusted = DetectedAgentSession(
+            session: assignment.session,
+            provider: assignment.provider,
+            role: .implementer,
+            roleConfidence: .high,
+            roleReason: "Selected by AgentHub as the implementation session"
+          )
+        } else {
+          adjusted = assignment
+        }
+        append(adjusted, to: &branch)
+      }
+      return branch
+    }
+  }
+
+  private func applyingManualRoleOverrides(
+    to branches: [DetectedBranchWorkflow]
+  ) -> [DetectedBranchWorkflow] {
+    guard !manualState.sessionRoleOverrides.isEmpty else { return branches }
+
+    return branches.map { branch in
+      var branch = branch
+      let assignments = branch.implementerSessions + branch.reviewerSessions
+      var seenIDs = Set<String>()
+      branch.implementerSessions = []
+      branch.reviewerSessions = []
+
+      for assignment in assignments where seenIDs.insert(assignment.id).inserted {
+        guard let role = manualState.sessionRoleOverrides[assignment.id] else {
+          append(assignment, to: &branch)
+          continue
+        }
+        append(
+          DetectedAgentSession(
+            session: assignment.session,
+            provider: assignment.provider,
+            role: role,
+            roleConfidence: .high,
+            roleReason: "Started manually as the \(role.rawValue)"
+          ),
+          to: &branch
+        )
+      }
       return branch
     }
   }

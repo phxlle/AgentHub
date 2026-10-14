@@ -8,10 +8,67 @@ import Foundation
 
 struct GitHubReviewSessionLaunch: Equatable, Sendable {
   let pullRequestID: String
+  let pullRequestURL: String
   let provider: SessionProviderKind
-  let pendingID: UUID
+  let pendingID: UUID?
+  let sessionID: String?
   let projectPath: String
   let launchedAt: Date
+
+  init(
+    pullRequestID: String,
+    pullRequestURL: String,
+    provider: SessionProviderKind,
+    pendingID: UUID?,
+    sessionID: String? = nil,
+    projectPath: String,
+    launchedAt: Date
+  ) {
+    self.pullRequestID = pullRequestID
+    self.pullRequestURL = pullRequestURL
+    self.provider = provider
+    self.pendingID = pendingID
+    self.sessionID = sessionID
+    self.projectPath = projectPath
+    self.launchedAt = launchedAt
+  }
+
+  init?(_ association: GitHubReviewSessionAssociation) {
+    guard let provider = association.providerKind else { return nil }
+    self.init(
+      pullRequestID: association.pullRequestID,
+      pullRequestURL: association.pullRequestURL,
+      provider: provider,
+      pendingID: association.pendingUUID,
+      sessionID: association.sessionID,
+      projectPath: association.projectPath,
+      launchedAt: association.createdAt
+    )
+  }
+
+  var association: GitHubReviewSessionAssociation {
+    GitHubReviewSessionAssociation(
+      pullRequestID: pullRequestID,
+      pullRequestURL: pullRequestURL,
+      provider: provider,
+      pendingID: pendingID,
+      sessionID: sessionID,
+      projectPath: projectPath,
+      createdAt: launchedAt
+    )
+  }
+
+  func resolving(to sessionID: String) -> GitHubReviewSessionLaunch {
+    GitHubReviewSessionLaunch(
+      pullRequestID: pullRequestID,
+      pullRequestURL: pullRequestURL,
+      provider: provider,
+      pendingID: pendingID,
+      sessionID: sessionID,
+      projectPath: projectPath,
+      launchedAt: launchedAt
+    )
+  }
 }
 
 struct GitHubReviewSessionInventory {
@@ -21,6 +78,9 @@ struct GitHubReviewSessionInventory {
   let resolvedPendingSessionIDs: [UUID: String]
   let customNames: [String: String]
   let statuses: [String: SessionStatus]
+  /// Jira ticket keys each session works on (branch, name, prompt), so a PR titled
+  /// "XFA-123: …" links to the session that implements XFA-123.
+  var ticketKeysBySessionID: [String: [String]] = [:]
 }
 
 struct GitHubReviewSessionLink: Identifiable, Equatable {
@@ -57,16 +117,26 @@ enum GitHubReviewSessionLinker {
         $0.pullRequestID == pullRequest.id && $0.provider == inventory.provider
       }
       for launch in providerLaunches {
-        if let sessionID = inventory.resolvedPendingSessionIDs[launch.pendingID],
+        if let sessionID = launch.sessionID,
           let session = inventory.sessions.first(where: { $0.id == sessionID })
         {
           insert(
             link(for: session, inventory: inventory),
             into: &candidates
           )
-        } else if let pending = inventory.pendingSessions.first(where: {
-          $0.id == launch.pendingID
-        }) {
+        } else if let pendingID = launch.pendingID,
+          let sessionID = inventory.resolvedPendingSessionIDs[pendingID],
+          let session = inventory.sessions.first(where: { $0.id == sessionID })
+        {
+          insert(
+            link(for: session, inventory: inventory),
+            into: &candidates
+          )
+        } else if let pendingID = launch.pendingID,
+          let pending = inventory.pendingSessions.first(where: {
+            $0.id == pendingID
+          })
+        {
           let session = pending.placeholderSession
           insert(
             GitHubReviewSessionLink(
@@ -77,11 +147,19 @@ enum GitHubReviewSessionLinker {
                 pendingId: pending.id
               ),
               isPending: true,
-              displayName: "Starting review",
+              displayName: pending.worktree.name,
               status: nil
             ),
             into: &candidates
           )
+        }
+      }
+
+      let pullRequestKeys = ticketKeys(inTitle: pullRequest.title)
+      if !pullRequestKeys.isEmpty {
+        for session in inventory.sessions
+        where !Set(inventory.ticketKeysBySessionID[session.id] ?? []).isDisjoint(with: pullRequestKeys) {
+          insert(link(for: session, inventory: inventory), into: &candidates)
         }
       }
 
@@ -140,6 +218,17 @@ enum GitHubReviewSessionLinker {
     )
   }
 
+  static func ticketKeys(inTitle title: String) -> Set<String> {
+    let range = NSRange(title.startIndex..., in: title)
+    return Set(
+      ticketKeyPattern.matches(in: title, range: range).compactMap { match in
+        Range(match.range, in: title).map { String(title[$0]).uppercased() }
+      })
+  }
+
+  private static let ticketKeyPattern = try! NSRegularExpression(
+    pattern: #"(?<![A-Za-z0-9])[A-Z][A-Z0-9]+-[0-9]+(?![0-9])"#)
+
   private static func isReviewSession(
     _ session: CLISession,
     for pullRequest: GitHubProjectPullRequest
@@ -151,6 +240,7 @@ enum GitHubReviewSessionLinker {
         return message.localizedCaseInsensitiveContains(
           "Review this pull request independently"
         )
+          || message.localizedCaseInsensitiveContains("independent code review")
           || message.localizedCaseInsensitiveContains("read-only review")
       }
   }

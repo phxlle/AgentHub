@@ -5,8 +5,8 @@
 //  Created by Assistant on 12/24/24.
 //
 
-import Foundation
 import AppKit
+import Foundation
 
 /// Helper object to handle launching Terminal with Claude sessions
 public struct TerminalLauncher {
@@ -62,14 +62,19 @@ public struct TerminalLauncher {
     onOutput: @escaping @MainActor (String) -> Void,
     onComplete: @escaping @MainActor (Error?) -> Void
   ) {
-    guard let claudeExecutablePath = findExecutable(
-      command: cliConfiguration.executableName,
-      additionalPaths: cliConfiguration.additionalPaths
-    ) else {
+    guard
+      let claudeExecutablePath = findExecutable(
+        command: cliConfiguration.executableName,
+        additionalPaths: cliConfiguration.additionalPaths
+      )
+    else {
       let error = NSError(
         domain: "TerminalLauncher",
         code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Could not find '\(cliConfiguration.executableName)' command. Please ensure Claude Code CLI is installed."]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Could not find '\(cliConfiguration.executableName)' command. Please ensure Claude Code CLI is installed."
+        ]
       )
       onComplete(error)
       return
@@ -89,8 +94,10 @@ public struct TerminalLauncher {
 
       // Set up environment with PATH for child processes
       var environment = ProcessInfo.processInfo.environment
-      let additionalPaths = CLIPathResolver.executableSearchPaths(additionalPaths: cliConfiguration.additionalPaths)
-        .joined(separator: ":")
+      let additionalPaths = CLIPathResolver.executableSearchPaths(
+        additionalPaths: cliConfiguration.additionalPaths
+      )
+      .joined(separator: ":")
       if !additionalPaths.isEmpty {
         if let existingPath = environment["PATH"] {
           environment["PATH"] = "\(additionalPaths):\(existingPath)"
@@ -136,7 +143,9 @@ public struct TerminalLauncher {
             let error = NSError(
               domain: "TerminalLauncher",
               code: Int(process.terminationStatus),
-              userInfo: [NSLocalizedDescriptionKey: "Process exited with status \(process.terminationStatus)"]
+              userInfo: [
+                NSLocalizedDescriptionKey: "Process exited with status \(process.terminationStatus)"
+              ]
             )
             onComplete(error)
           } else {
@@ -169,14 +178,18 @@ public struct TerminalLauncher {
     initialPrompt: String? = nil
   ) -> Error? {
     // Find the executable using just the executable name (first word of command)
-    guard let executablePath = findExecutable(
-      command: cliConfiguration.executableName,
-      additionalPaths: cliConfiguration.additionalPaths
-    ) else {
+    guard
+      let executablePath = findExecutable(
+        command: cliConfiguration.executableName,
+        additionalPaths: cliConfiguration.additionalPaths
+      )
+    else {
       return NSError(
         domain: "TerminalLauncher",
         code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Could not find '\(cliConfiguration.executableName)' command."]
+        userInfo: [
+          NSLocalizedDescriptionKey: "Could not find '\(cliConfiguration.executableName)' command."
+        ]
       )
     }
 
@@ -185,7 +198,9 @@ public struct TerminalLauncher {
       return NSError(
         domain: "TerminalLauncher",
         code: 3,
-        userInfo: [NSLocalizedDescriptionKey: "Executable path contains invalid characters (newlines)."]
+        userInfo: [
+          NSLocalizedDescriptionKey: "Executable path contains invalid characters (newlines)."
+        ]
       )
     }
 
@@ -201,7 +216,9 @@ public struct TerminalLauncher {
         return NSError(
           domain: "TerminalLauncher",
           code: 3,
-          userInfo: [NSLocalizedDescriptionKey: "Project path contains invalid characters (newlines)."]
+          userInfo: [
+            NSLocalizedDescriptionKey: "Project path contains invalid characters (newlines)."
+          ]
         )
       }
       command = "cd \(escapedPath) && \(escapedExecPath) \(joinedArgs)"
@@ -232,25 +249,34 @@ public struct TerminalLauncher {
     dangerouslySkipPermissions: Bool = false,
     worktreeName: String? = nil
   ) -> Error? {
-    guard let claudeExecutablePath = findExecutable(
-      command: cliConfiguration.executableName,
-      additionalPaths: cliConfiguration.additionalPaths
-    ) else {
+    guard
+      let claudeExecutablePath = findExecutable(
+        command: cliConfiguration.executableName,
+        additionalPaths: cliConfiguration.additionalPaths
+      )
+    else {
       return NSError(
         domain: "TerminalLauncher",
         code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Could not find '\(cliConfiguration.executableName)' command. Please ensure Claude Code CLI is installed."]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Could not find '\(cliConfiguration.executableName)' command. Please ensure Claude Code CLI is installed."
+        ]
       )
     }
 
     // Escape all values for safe shell interpolation (single-quoted)
     guard let escapedPath = shellEscapeSingleQuoted(path),
-          let escapedClaudePath = shellEscapeSingleQuoted(claudeExecutablePath),
-          let escapedBranch = shellEscapeSingleQuoted(branchName) else {
+      let escapedClaudePath = shellEscapeSingleQuoted(claudeExecutablePath),
+      let escapedBranch = shellEscapeSingleQuoted(branchName)
+    else {
       return NSError(
         domain: "TerminalLauncher",
         code: 3,
-        userInfo: [NSLocalizedDescriptionKey: "Path, branch name, or executable path contains invalid characters (newlines)."]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Path, branch name, or executable path contains invalid characters (newlines)."
+        ]
       )
     }
 
@@ -266,11 +292,13 @@ public struct TerminalLauncher {
     // Otherwise, checkout the branch first
     let command: String
     if isWorktree || skipCheckout {
-      command = joinedArgs.isEmpty
+      command =
+        joinedArgs.isEmpty
         ? "cd \(escapedPath) && \(escapedClaudePath)"
         : "cd \(escapedPath) && \(escapedClaudePath) \(joinedArgs)"
     } else {
-      command = joinedArgs.isEmpty
+      command =
+        joinedArgs.isEmpty
         ? "cd \(escapedPath) && git checkout \(escapedBranch) && \(escapedClaudePath)"
         : "cd \(escapedPath) && git checkout \(escapedBranch) && \(escapedClaudePath) \(joinedArgs)"
     }
@@ -278,13 +306,53 @@ public struct TerminalLauncher {
     return launchTerminalScript(command: command, scriptPrefix: "claude_open")
   }
 
+  /// Opens Terminal with a fixed executable and argument list. Values are shell-escaped before the
+  /// temporary command file is created, so callers do not need to construct shell source.
+  static func launchTerminalCommand(
+    executableName: String,
+    arguments: [String],
+    scriptPrefix: String
+  ) -> Error? {
+    guard let executablePath = findExecutable(command: executableName, additionalPaths: nil) else {
+      return NSError(
+        domain: "TerminalLauncher",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Could not find '\(executableName)' command."]
+      )
+    }
+    guard let escapedExecutable = shellEscapeSingleQuoted(executablePath) else {
+      return NSError(
+        domain: "TerminalLauncher",
+        code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "Executable path contains invalid characters."]
+      )
+    }
+
+    let escapedArguments = arguments.map(shellEscapeSingleQuotedAllowingNewlines)
+      .joined(separator: " ")
+    let command =
+      escapedArguments.isEmpty
+      ? escapedExecutable
+      : "\(escapedExecutable) \(escapedArguments)"
+    return launchTerminalScript(
+      command: command,
+      scriptPrefix: scriptPrefix,
+      includeCLIEnvironmentOverrides: false
+    )
+  }
+
   /// Creates and executes a terminal script using secure temp-file creation.
   /// Uses O_CREAT | O_EXCL to atomically create the file, eliminating TOCTOU races.
-  private static func launchTerminalScript(command: String, scriptPrefix: String) -> Error? {
+  private static func launchTerminalScript(
+    command: String,
+    scriptPrefix: String,
+    includeCLIEnvironmentOverrides: Bool = true
+  ) -> Error? {
     let tempDir = NSTemporaryDirectory()
-    let scriptPath = (tempDir as NSString).appendingPathComponent("\(scriptPrefix)_\(UUID().uuidString).command")
+    let scriptPath = (tempDir as NSString).appendingPathComponent(
+      "\(scriptPrefix)_\(UUID().uuidString).command")
 
-    let cliEnvironmentExports = Self.cliEnvironmentExports
+    let cliEnvironmentExports = includeCLIEnvironmentOverrides ? Self.cliEnvironmentExports : ""
     let scriptContent = "#!/bin/bash\n\(cliEnvironmentExports)\n\(command)\n"
 
     // Atomically create the file with O_CREAT | O_EXCL (fails if path exists)
@@ -294,7 +362,10 @@ public struct TerminalLauncher {
       return NSError(
         domain: "TerminalLauncher",
         code: 2,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to create temp script: \(String(cString: strerror(errno)))"]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Failed to create temp script: \(String(cString: strerror(errno)))"
+        ]
       )
     }
     defer { close(fd) }
@@ -368,7 +439,7 @@ public struct TerminalLauncher {
       "\(homeDir)/.nvm/current/bin",
       "\(homeDir)/.nvm/versions/node/v22.16.0/bin",
       "\(homeDir)/.nvm/versions/node/v20.11.1/bin",
-      "\(homeDir)/.nvm/versions/node/v18.19.0/bin"
+      "\(homeDir)/.nvm/versions/node/v18.19.0/bin",
     ]
 
     for nvmPath in nvmPaths {
@@ -424,8 +495,10 @@ public struct TerminalLauncher {
       task.waitUntilExit()
 
       if task.terminationStatus == 0 {
-        if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !path.isEmpty {
+        if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(
+          in: .whitespacesAndNewlines),
+          !path.isEmpty
+        {
           return path
         }
       }

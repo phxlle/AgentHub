@@ -34,6 +34,15 @@ public enum AgentHubDefaults {
   /// Type: Int (default: 0)
   public static let approvalTimeout = "\(keyPrefix)sessions.approvalTimeout"
 
+  /// Selected grouping in the combined Sessions sidebar
+  /// Type: String (default: "Repo")
+  public static let sessionsSidebarGroupMode = "\(keyPrefix)sessions.sidebarGroupMode"
+
+  /// Active implementation/review comparison, retained until explicitly closed
+  /// Type: Data (JSON-encoded WorkflowSessionComparisonRequest)
+  public static let activeWorkflowSessionComparison =
+    "\(keyPrefix)sessions.activeWorkflowComparison"
+
   // MARK: - Notification Settings
 
   /// Whether notification sounds are enabled
@@ -406,4 +415,18 @@ public enum AgentHubDefaults {
       defaults.set(true, forKey: themeMigrationKey)
     }
   }
+
+  /// Sprint board assignee filter: `everyone`, `me`, `unassigned`, or `person:<accountId>`.
+  /// Type: String (default: me)
+  public static let jiraSprintAssigneeFilter = "\(keyPrefix)jira.sprint.assigneeFilter"
+
+  /// Jira board the Sprint workspace shows. Type: Int
+  public static let jiraSprintBoardID = "\(keyPrefix)jira.sprint.boardID"
+
+  /// Jira sprint the Sprint workspace shows; falls back to the active sprint. Type: Int
+  public static let jiraSprintSprintID = "\(keyPrefix)jira.sprint.sprintID"
+
+  /// Local repository path that Sprint ticket sessions start in.
+  /// Type: String
+  public static let jiraSprintRepositoryPath = "\(keyPrefix)jira.sprint.repositoryPath"
 }

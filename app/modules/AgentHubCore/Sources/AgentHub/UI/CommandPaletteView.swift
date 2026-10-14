@@ -12,11 +12,15 @@ import SwiftUI
 public enum CommandPaletteAction: Identifiable {
   case newSession
   case newWorkspace
-  case switchToSession(id: String, name: String, provider: SessionProviderKind, firstMessage: String?)
+  case switchToSession(
+    id: String, name: String, provider: SessionProviderKind, firstMessage: String?)
   case selectRepository(path: String, name: String)
   case openSettings
   case toggleSidebar
   case toggleTerminalEditor
+  case previousSession
+  case nextSession
+  case archiveCurrentSession
 
   public var id: String {
     switch self {
@@ -27,6 +31,9 @@ public enum CommandPaletteAction: Identifiable {
     case .openSettings: return "settings"
     case .toggleSidebar: return "toggle-sidebar"
     case .toggleTerminalEditor: return "toggle-terminal-editor"
+    case .previousSession: return "previous-session"
+    case .nextSession: return "next-session"
+    case .archiveCurrentSession: return "archive-current-session"
     }
   }
 
@@ -39,6 +46,9 @@ public enum CommandPaletteAction: Identifiable {
     case .openSettings: return "Open Settings"
     case .toggleSidebar: return "Toggle Sidebar"
     case .toggleTerminalEditor: return "Next Session Tab"
+    case .previousSession: return "Previous Open Session"
+    case .nextSession: return "Next Open Session"
+    case .archiveCurrentSession: return "Archive Current Session"
     }
   }
 
@@ -58,6 +68,9 @@ public enum CommandPaletteAction: Identifiable {
     case .openSettings: return "Open application settings"
     case .toggleSidebar: return "Show or hide the sidebar"
     case .toggleTerminalEditor: return "Cycle the focused session through visible tabs"
+    case .previousSession: return "Move backward through sessions in sidebar order"
+    case .nextSession: return "Move forward through sessions in sidebar order"
+    case .archiveCurrentSession: return "Close the focused session after confirmation"
     }
   }
 
@@ -70,6 +83,9 @@ public enum CommandPaletteAction: Identifiable {
     case .openSettings: return "gear"
     case .toggleSidebar: return "sidebar.left"
     case .toggleTerminalEditor: return "arrow.triangle.2.circlepath"
+    case .previousSession: return "chevron.left"
+    case .nextSession: return "chevron.right"
+    case .archiveCurrentSession: return "archivebox"
     }
   }
 
@@ -80,6 +96,9 @@ public enum CommandPaletteAction: Identifiable {
     case .toggleSidebar: return "⌘B"
     case .openSettings: return "⌘,"
     case .toggleTerminalEditor: return "⌥`"
+    case .previousSession: return "⌃⇧⇥"
+    case .nextSession: return "⌃⇥"
+    case .archiveCurrentSession: return "⌘⌥A"
     default: return nil
     }
   }
@@ -144,6 +163,9 @@ public struct CommandPaletteView: View {
     [
       .newSession,
       .newWorkspace,
+      .previousSession,
+      .nextSession,
+      .archiveCurrentSession,
       .toggleTerminalEditor,
       .openSettings,
       .toggleSidebar,
@@ -545,7 +567,8 @@ public struct CommandPaletteSession {
   public let provider: SessionProviderKind
   public let firstMessage: String?
 
-  public init(id: String, name: String, provider: SessionProviderKind, firstMessage: String? = nil) {
+  public init(id: String, name: String, provider: SessionProviderKind, firstMessage: String? = nil)
+  {
     self.id = id
     self.name = name
     self.provider = provider

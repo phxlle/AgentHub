@@ -82,11 +82,12 @@ public struct ThemeColors {
 extension Color {
   /// Create a Color from 0...255 RGB values (and optional alpha)
   init(red: Double, green: Double, blue: Double, alpha: Double = 1.0) {
-    self.init(.sRGB,
-              red: red / 255.0,
-              green: green / 255.0,
-              blue: blue / 255.0,
-              opacity: alpha)
+    self.init(
+      .sRGB,
+      red: red / 255.0,
+      green: green / 255.0,
+      blue: blue / 255.0,
+      opacity: alpha)
   }
 
   init(red: Int, green: Int, blue: Int, alpha: Double = 1.0) {
@@ -99,9 +100,11 @@ extension Color {
     var int = UInt64()
     Scanner(string: hex).scanHexInt64(&int)
 
-    let r, g, b: UInt64
+    let r: UInt64
+    let g: UInt64
+    let b: UInt64
     switch hex.count {
-    case 6: // RGB (24-bit)
+    case 6:  // RGB (24-bit)
       (r, g, b) = ((int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
     default:
       (r, g, b) = (0, 0, 0)
@@ -184,12 +187,16 @@ extension Color {
   // MARK: - Theme Colors Helper
 
   private static func getCurrentThemeColors() -> ThemeColors {
-    let selectedTheme = UserDefaults.standard.string(forKey: AgentHubDefaults.selectedTheme) ?? "neutral"
+    let selectedTheme =
+      UserDefaults.standard.string(forKey: AgentHubDefaults.selectedTheme) ?? "neutral"
     guard let theme = AppTheme(rawValue: selectedTheme) else {
       // YAML theme — read cached hex values
-      let yamlPrimary = UserDefaults.standard.string(forKey: AgentHubDefaults.yamlPrimaryHex) ?? "#CC785C"
-      let yamlSecondary = UserDefaults.standard.string(forKey: AgentHubDefaults.yamlSecondaryHex) ?? "#D4A27F"
-      let yamlTertiary = UserDefaults.standard.string(forKey: AgentHubDefaults.yamlTertiaryHex) ?? "#EBDBBC"
+      let yamlPrimary =
+        UserDefaults.standard.string(forKey: AgentHubDefaults.yamlPrimaryHex) ?? "#CC785C"
+      let yamlSecondary =
+        UserDefaults.standard.string(forKey: AgentHubDefaults.yamlSecondaryHex) ?? "#D4A27F"
+      let yamlTertiary =
+        UserDefaults.standard.string(forKey: AgentHubDefaults.yamlTertiaryHex) ?? "#EBDBBC"
       return ThemeColors(
         brandPrimary: appearanceAdaptive(
           lightHex: UserDefaults.standard.string(forKey: AgentHubDefaults.yamlLightPrimaryHex)
@@ -226,7 +233,7 @@ extension Color {
   static let backgroundDark = Color(hex: "#262624")
   static let backgroundLight = Color(hex: "#FAF9F5")
   static let expandedContentBackgroundDark = Color(hex: "#1F2421")
-  static let expandedContentBackgroundLight = Color.white//(hex: "#F8F4E3")
+  static let expandedContentBackgroundLight = Color.white  //(hex: "#F8F4E3")
 
   // MARK: - Surface Colors (for depth hierarchy)
 
@@ -251,7 +258,7 @@ extension Color {
   }
 
   public static var surfaceOverlay: Color {
-    Color.gray.opacity(0.06)    
+    Color.gray.opacity(0.06)
   }
 
   public static var surfaceHover: Color {
@@ -259,7 +266,7 @@ extension Color {
   }
 
   public static var borderSubtle: Color {
-      Color.primary.opacity(0.85)
+    Color.primary.opacity(0.85)
   }
 
   public static var flatCardBackground: Color {
@@ -273,7 +280,7 @@ extension Color {
       colors: [
         brandPrimary.opacity(0.08),
         brandSecondary.opacity(0.04),
-        Color.clear
+        Color.clear,
       ],
       startPoint: .topLeading,
       endPoint: .bottomTrailing
@@ -294,7 +301,8 @@ extension Color {
     colorScheme == .dark ? expandedContentBackgroundDark : expandedContentBackgroundLight
   }
 
-  public static func adaptiveBackground(for colorScheme: ColorScheme, theme: RuntimeTheme?) -> Color {
+  public static func adaptiveBackground(for colorScheme: ColorScheme, theme: RuntimeTheme?) -> Color
+  {
     if let theme = theme {
       if colorScheme == .dark, let dark = theme.backgroundDark {
         return dark
@@ -305,7 +313,9 @@ extension Color {
     return adaptiveBackground(for: colorScheme)
   }
 
-  public static func adaptiveExpandedContentBackground(for colorScheme: ColorScheme, theme: RuntimeTheme?) -> Color {
+  public static func adaptiveExpandedContentBackground(
+    for colorScheme: ColorScheme, theme: RuntimeTheme?
+  ) -> Color {
     if let theme = theme {
       if colorScheme == .dark, let dark = theme.expandedContentBackgroundDark {
         return dark
@@ -314,6 +324,38 @@ extension Color {
       }
     }
     return adaptiveExpandedContentBackground(for: colorScheme)
+  }
+
+  /// Resolves the secondary workspace surface from the same runtime theme as
+  /// the terminal canvas. Themes without a dedicated expanded-content color
+  /// retain their main background instead of falling back to an unrelated
+  /// system gray.
+  public static func themedPanelBackground(
+    for colorScheme: ColorScheme,
+    theme: RuntimeTheme?
+  ) -> Color {
+    guard let theme else { return surfacePanel }
+
+    switch colorScheme {
+    case .dark:
+      return theme.expandedContentBackgroundDark
+        ?? theme.backgroundDark
+        ?? surfacePanel
+    case .light:
+      return theme.expandedContentBackgroundLight
+        ?? theme.backgroundLight
+        ?? surfacePanel
+    @unknown default:
+      return surfacePanel
+    }
+  }
+
+  /// A quiet fill for search fields and compact controls on themed surfaces.
+  /// The tint keeps controls recognizable without introducing an additional
+  /// palette outside the user's selected theme.
+  public static func themedControlBackground(theme: RuntimeTheme?) -> Color {
+    guard theme?.hasCustomBackgrounds == true else { return surfaceCard }
+    return brandPrimary(from: theme).opacity(0.12)
   }
 
   public static var isSentryThemeSelectedStrict: Bool {
@@ -340,17 +382,20 @@ extension NSColor {
     let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
     var int = UInt64()
     Scanner(string: cleaned).scanHexInt64(&int)
-    let r, g, b: UInt64
+    let r: UInt64
+    let g: UInt64
+    let b: UInt64
     switch cleaned.count {
     case 6:
       (r, g, b) = ((int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
     default:
-      (r, g, b) = (124, 58, 237) // fallback purple
+      (r, g, b) = (124, 58, 237)  // fallback purple
     }
-    return NSColor(srgbRed: CGFloat(r) / 255.0,
-                   green: CGFloat(g) / 255.0,
-                   blue: CGFloat(b) / 255.0,
-                   alpha: 1.0)
+    return NSColor(
+      srgbRed: CGFloat(r) / 255.0,
+      green: CGFloat(g) / 255.0,
+      blue: CGFloat(b) / 255.0,
+      alpha: 1.0)
   }
 
   /// Hex string like #RRGGBB

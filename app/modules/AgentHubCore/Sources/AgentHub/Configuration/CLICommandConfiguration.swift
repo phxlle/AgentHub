@@ -193,13 +193,16 @@ public struct CLICommandConfiguration: Codable, Sendable {
       if let sessionId, !sessionId.isEmpty, !sessionId.hasPrefix("pending-") {
         var trailingArgs = ["-r", sessionId]
         if let prompt, !prompt.isEmpty {
-          trailingArgs.append(prompt)
+          // Claude's --mcp-config, --allowedTools, and --disallowedTools flags
+          // accept a variable number of values. Mark the start of the prompt
+          // explicitly so it can never be consumed as another option value.
+          trailingArgs += ["--", prompt]
         }
         return assembleArguments(prefix: prefix, providerArgs: providerArgs, trailingArgs: trailingArgs)
       }
       var trailingArgs: [String] = []
       if let prompt, !prompt.isEmpty {
-        trailingArgs.append(prompt)
+        trailingArgs += ["--", prompt]
       }
       return assembleArguments(prefix: prefix, providerArgs: providerArgs, trailingArgs: trailingArgs)
 

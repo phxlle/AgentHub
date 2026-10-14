@@ -43,6 +43,32 @@ struct TerminalProcessRegistryTests {
     #expect(rows.first?.registeredAt == registeredAt)
   }
 
+  @Test("Archive cleanup terminates only the archived session's terminal processes")
+  func terminatesOnlyArchivedSessionTerminals() async throws {
+    let store = MockManagedProcessStore()
+    let terminator = MockProcessTerminator()
+    let registry = TerminalProcessRegistry(
+      store: store,
+      processInspector: MockProcessInspector(identities: [
+        101: identity(pid: 101, groupId: 101, startTime: 1_000),
+        102: identity(pid: 102, groupId: 102, startTime: 1_000),
+        103: identity(pid: 103, groupId: 103, startTime: 1_000),
+      ]),
+      processTerminator: terminator
+    )
+    await registry.register(
+      pid: 101, kind: .agentTerminal, provider: .codex, terminalKey: "s-archived", sessionId: "s-archived")
+    await registry.register(
+      pid: 102, kind: .agentTerminal, provider: .codex, terminalKey: "s-open", sessionId: "s-open")
+    await registry.register(
+      pid: 103, kind: .agentTerminal, provider: .claude, terminalKey: "s-archived", sessionId: "s-archived")
+
+    await registry.terminateSessionTerminalProcesses(provider: .codex, sessionId: "s-archived")
+
+    #expect(await terminator.terminatedPIDs() == [101])
+    #expect(try await store.getManagedProcesses().map(\.pid).sorted() == [102, 103])
+  }
+
   @Test("Register only persists owned process groups")
   func registerOnlyPersistsOwnedProcessGroups() async throws {
     let store = MockManagedProcessStore()

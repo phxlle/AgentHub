@@ -3,10 +3,10 @@
 //  AgentHub
 //
 
-import Foundation
-import SwiftUI
 import AgentHubCore
 import AgentHubGitHub
+import Foundation
+import SwiftUI
 
 // MARK: - GlobalSessionControlPanelView
 
@@ -19,7 +19,8 @@ private struct GlobalSessionCleanupDeletionConfirmation: Identifiable {
       let pullRequestText = suggestion.mergedPullRequestNumbers
         .map { "#\($0)" }
         .joined(separator: ", ")
-      return "- \(suggestion.worktreeName) (merged PR \(pullRequestText))\n  \(suggestion.worktreePath)"
+      return
+        "- \(suggestion.worktreeName) (merged PR \(pullRequestText))\n  \(suggestion.worktreePath)"
     }
     .joined(separator: "\n")
   }
@@ -447,7 +448,8 @@ public struct GlobalSessionControlPanelView: View {
     .padding()
   }
 
-  private func updateGitHubState(_ state: GlobalSessionControlPanelGitHubState?, for itemID: String) {
+  private func updateGitHubState(_ state: GlobalSessionControlPanelGitHubState?, for itemID: String)
+  {
     if let state {
       gitHubStates[itemID] = state
     } else {
@@ -504,7 +506,8 @@ public struct GlobalSessionControlPanelView: View {
       providerKind: item.providerKind,
       sessionId: item.session.id,
       projectPath: item.session.projectPath,
-      itemId: item.id
+      itemId: item.id,
+      session: item.isPending ? nil : item.session
     )
     onSelectSession()
   }
@@ -516,7 +519,9 @@ public struct GlobalSessionControlPanelView: View {
     )
   }
 
-  private func deletionConfirmationAlert(_ confirmation: GlobalSessionCleanupDeletionConfirmation) -> Alert {
+  private func deletionConfirmationAlert(_ confirmation: GlobalSessionCleanupDeletionConfirmation)
+    -> Alert
+  {
     Alert(
       title: Text("Delete Suggested Worktrees?"),
       message: Text(confirmation.message),
@@ -546,7 +551,8 @@ public struct GlobalSessionControlPanelView: View {
 
     for suggestion in suggestions {
       let viewModel = deletionViewModel(for: suggestion)
-      let worktree = matchingWorktree(at: suggestion.worktreePath)
+      let worktree =
+        matchingWorktree(at: suggestion.worktreePath)
         ?? WorktreeBranch(
           name: suggestion.worktreeName,
           path: suggestion.worktreePath,
@@ -558,11 +564,12 @@ public struct GlobalSessionControlPanelView: View {
         deleted.append(suggestion)
         removeFromSidebars(worktreePath: suggestion.worktreePath)
       } else {
-        failures.append(GlobalSessionCleanupDeletionFailure(
-          suggestion: suggestion,
-          message: viewModel.worktreeDeletionError?.message
-            ?? "The worktree could not be deleted."
-        ))
+        failures.append(
+          GlobalSessionCleanupDeletionFailure(
+            suggestion: suggestion,
+            message: viewModel.worktreeDeletionError?.message
+              ?? "The worktree could not be deleted."
+          ))
         viewModel.clearWorktreeDeletionError()
       }
     }
@@ -573,7 +580,9 @@ public struct GlobalSessionControlPanelView: View {
     deletionResult = GlobalSessionCleanupDeletionResult(deleted: deleted, failures: failures)
   }
 
-  private func deletionViewModel(for suggestion: GlobalSessionCleanupSuggestion) -> CLISessionsViewModel {
+  private func deletionViewModel(for suggestion: GlobalSessionCleanupSuggestion)
+    -> CLISessionsViewModel
+  {
     if containsWorktree(at: suggestion.worktreePath, in: claudeViewModel) {
       return claudeViewModel
     }
@@ -724,7 +733,7 @@ private struct GlobalSessionControlPanelRow: View {
       "\(summary.total)",
       gitHubViewModel.blockers.map(\.rawValue).sorted().map(String.init).joined(separator: ","),
       "\(gitHubViewModel.observationState.isUnavailable)",
-      "\(gitHubViewModel.observationState.isRefreshing)"
+      "\(gitHubViewModel.observationState.isRefreshing)",
     ].joined(separator: "|")
   }
 
@@ -979,7 +988,9 @@ private struct GlobalSessionControlPanelRow: View {
     case .waitingForUser:
       return "ready"
     case .awaitingApproval(let tool):
-      return "approval: \(tool.lowercased())"
+      return SessionInteractiveInputTool.matches(tool)
+        ? "input needed"
+        : "approval: \(tool.lowercased())"
     case .idle:
       return "idle"
     }
@@ -1075,14 +1086,15 @@ private struct GlobalSessionControlPanelRow: View {
       return
     }
 
-    onGitHubStateChange(GlobalSessionControlPanelGitHubState(
-      hasPullRequest: true,
-      ciStatus: gitHubViewModel.ciSummary.overallStatus,
-      isRefreshing: gitHubViewModel.observationState.isRefreshing,
-      pullRequestNumber: pullRequest.number,
-      pullRequestState: pullRequest.stateKind,
-      pullRequestMergeability: pullRequest.mergeabilityKind,
-      blockers: gitHubViewModel.blockers
-    ))
+    onGitHubStateChange(
+      GlobalSessionControlPanelGitHubState(
+        hasPullRequest: true,
+        ciStatus: gitHubViewModel.ciSummary.overallStatus,
+        isRefreshing: gitHubViewModel.observationState.isRefreshing,
+        pullRequestNumber: pullRequest.number,
+        pullRequestState: pullRequest.stateKind,
+        pullRequestMergeability: pullRequest.mergeabilityKind,
+        blockers: gitHubViewModel.blockers
+      ))
   }
 }

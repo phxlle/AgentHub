@@ -5,6 +5,49 @@ import Testing
 
 @Suite("GitHub Project review service")
 struct GitHubProjectReviewServiceTests {
+  @Test("OR is its own argument so gh does not quote the query as one phrase")
+  func orTerms() {
+    #expect(GitHubProjectReviewService.orTerms(["A-1", "A-2", "A-3"]) == ["A-1", "OR", "A-2", "OR", "A-3"])
+    #expect(GitHubProjectReviewService.orTerms(["A-1"]) == ["A-1"])
+  }
+
+  @Test("Ticket keys match exactly in title or body")
+  func ticketKeyMentions() {
+    #expect(GitHubProjectReviewService.mentions("XFA-12: fix", key: "XFA-12"))
+    #expect(GitHubProjectReviewService.mentions("Fixes xfa-12.", key: "XFA-12"))
+    #expect(!GitHubProjectReviewService.mentions("XFA-123: other", key: "XFA-12"))
+    #expect(!GitHubProjectReviewService.mentions("AXFA-12", key: "XFA-12"))
+  }
+
+  @Test("Ticket pull requests list open ones first, then most recently updated")
+  func ticketPullRequestOrder() {
+    func pr(_ id: String, _ state: String, _ updated: Double) -> GitHubProjectPullRequest {
+      GitHubProjectPullRequest(
+        id: id, number: 1, title: id, url: "u", repositoryName: "r", repositoryNameWithOwner: "o/r",
+        authorLogin: nil, updatedAt: Date(timeIntervalSince1970: updated), isDraft: false,
+        state: state, projectStatus: nil, projectPriority: nil)
+    }
+    let sorted = GitHubProjectReviewService.sortedForTicket([
+      pr("merged-new", "MERGED", 300), pr("open-old", "OPEN", 100), pr("open-new", "open", 200),
+    ])
+    #expect(sorted.map(\.id) == ["open-new", "open-old", "merged-new"])
+  }
+
+  @Test("Rate-limit reset prefers the exhausted bucket")
+  func rateLimitResetPrefersExhaustedBucket() {
+    let json = """
+      {"resources": {
+        "core": {"limit": 5000, "remaining": 4900, "reset": 1791400000},
+        "graphql": {"limit": 5000, "remaining": 0, "reset": 1791401234},
+        "search": {"limit": 30, "remaining": 30, "reset": 1791399000}
+      }}
+      """
+    #expect(
+      GitHubProjectReviewService.rateLimitResetDate(fromRateLimitJSON: json)
+        == Date(timeIntervalSince1970: 1_791_401_234))
+    #expect(GitHubProjectReviewService.rateLimitResetDate(fromRateLimitJSON: "not json") == nil)
+  }
+
   @Test("Project status is separated from the GitHub pull request search")
   func buildsSearchPlan() {
     let plan = GitHubProjectReviewService.searchPlan(
@@ -84,8 +127,8 @@ struct GitHubProjectReviewServiceTests {
     #expect(projects[0].views.first?.filter?.contains("Code Review") == true)
   }
 
-  @Test("Decodes the selected project's status for a PR")
-  func decodesProjectStatus() throws {
+  @Test("Decodes the selected project's status and priority for a PR")
+  func decodesProjectFields() throws {
     let json = #"""
       {
         "data": {
@@ -96,11 +139,13 @@ struct GitHubProjectReviewServiceTests {
                 "nodes": [
                   {
                     "project": { "id": "other-project" },
-                    "fieldValueByName": { "name": "Done" }
+                    "status": { "name": "Done" },
+                    "priority": null
                   },
                   {
                     "project": { "id": "project-3" },
-                    "fieldValueByName": { "name": "Code Review 🔎" }
+                    "status": { "name": "Code Review 🔎" },
+                    "priority": { "name": "Urgent ‼️" }
                   }
                 ]
               }
@@ -110,11 +155,12 @@ struct GitHubProjectReviewServiceTests {
       }
       """#
 
-    let statuses = try GitHubProjectReviewService.decodeProjectStatuses(
+    let values = try GitHubProjectReviewService.decodeProjectFieldValues(
       json,
       projectID: "project-3"
     )
 
-    #expect(statuses["pr-1"] == "Code Review 🔎")
+    #expect(values["pr-1"]?.status == "Code Review 🔎")
+    #expect(values["pr-1"]?.priority == "Urgent ‼️")
   }
 }

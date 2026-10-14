@@ -1,6 +1,62 @@
 import AgentHubGitHub
 import SwiftUI
 
+struct SessionSidebarPresentation: Equatable {
+  let title: String
+  let context: String
+  let linkedPullRequest: GitHubPullRequestURLReference?
+
+  init(
+    session: CLISession,
+    customName: String?,
+    linkedPullRequests: [GitHubPullRequestURLReference]
+  ) {
+    let cleanedCustomName = Self.cleaned(customName)
+    let branch = Self.cleaned(session.branchName)
+    let meaningfulBranch = branch.flatMap { Self.isDefaultBranch($0) ? nil : $0 }
+    let pullRequest = linkedPullRequests.last
+    linkedPullRequest = pullRequest
+
+    if let cleanedCustomName {
+      title = cleanedCustomName
+    } else if let pullRequest {
+      title = "PR #\(pullRequest.number)"
+    } else if let meaningfulBranch {
+      title = meaningfulBranch
+    } else if let slug = Self.cleaned(session.slug) {
+      title = slug
+    } else if !session.projectName.isEmpty {
+      title = "\(session.projectName) · \(session.shortId)"
+    } else {
+      title = session.shortId
+    }
+
+    var contextParts: [String] = []
+    if let pullRequest {
+      contextParts.append("Reviewing PR #\(pullRequest.number)")
+      contextParts.append("\(pullRequest.owner)/\(pullRequest.repository)")
+    } else if !session.projectName.isEmpty {
+      contextParts.append(session.projectName)
+    }
+    if let displayBranch = pullRequest == nil ? branch : meaningfulBranch,
+      displayBranch.localizedCaseInsensitiveCompare(title) != .orderedSame
+    {
+      contextParts.append(displayBranch)
+    }
+    context = contextParts.joined(separator: " · ")
+  }
+
+  private static func cleaned(_ value: String?) -> String? {
+    let cleaned = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return cleaned.isEmpty ? nil : cleaned
+  }
+
+  private static func isDefaultBranch(_ branch: String) -> Bool {
+    branch.caseInsensitiveCompare("main") == .orderedSame
+      || branch.caseInsensitiveCompare("master") == .orderedSame
+  }
+}
+
 // MARK: - CollapsibleSessionRow
 
 struct CollapsibleSessionRow: View {
@@ -18,11 +74,8 @@ struct CollapsibleSessionRow: View {
   let onArchive: (() -> Void)?
   let onSelect: () -> Void
 
-  private static let statusLabelMaxWidth: CGFloat = 96
+  private static let statusLabelMaxWidth: CGFloat = 124
 
-  @State private var isHovered = false
-  @State private var showHoverPreview = false
-  @State private var showArchiveConfirm = false
   @State private var pulseScale: CGFloat = 1.0
   @State private var isPulseAnimating = false
   @State private var sessionGitHubQuickAccessViewModel = SessionGitHubQuickAccessViewModel()
@@ -31,19 +84,28 @@ struct CollapsibleSessionRow: View {
 
   // MARK: - Computed
 
-  private var displayName: String {
-    customName ?? session.slug ?? session.shortId
+  private var presentation: SessionSidebarPresentation {
+    SessionSidebarPresentation(
+      session: session,
+      customName: customName,
+      linkedPullRequests: linkedPullRequests
+    )
   }
 
   private var statusColor: Color {
+    if attention != nil { return .orange }
     guard let sessionStatus else { return .secondary }
     switch sessionStatus {
     case .thinking: return .blue
     case .executingTool: return .orange
     case .waitingForUser: return .green
-    case .awaitingApproval: return .yellow
+    case .awaitingApproval: return .orange
     case .idle: return .secondary
     }
+  }
+
+  private var attention: SidebarSessionAttention? {
+    SidebarSessionAttention(status: sessionStatus)
   }
 
   private var isActiveStatus: Bool {
@@ -70,13 +132,10 @@ struct CollapsibleSessionRow: View {
     case .thinking: return "working"
     case .executingTool(let name): return name.lowercased()
     case .waitingForUser: return "ready"
-    case .awaitingApproval(let tool): return tool.lowercased()
+    case .awaitingApproval(let tool):
+      return SessionInteractiveInputTool.matches(tool) ? "Input needed" : "Approval needed"
     case .idle: return "idle"
     }
-  }
-
-  private var showActions: Bool {
-    isHovered && !isPending && (onPin != nil || onArchive != nil)
   }
 
   private var gitHubObservationTaskID: String {
@@ -88,21 +147,6 @@ struct CollapsibleSessionRow: View {
     return "\(repositoryKey)|\(isPending)|\(agentHub != nil)"
   }
 
-  /// Popup metadata resolved from data already on hand: the session itself
-  /// plus the selected repositories, so worktree sessions surface their parent
-  /// repo and registered worktree root.
-  private var hoverPreview: SessionHoverPreview {
-    let repositories = WorktreeModuleResolver.mergedRepositories(
-      (agentHub?.claudeSessionsViewModel.selectedRepositories ?? [])
-        + (agentHub?.codexSessionsViewModel.selectedRepositories ?? [])
-    )
-    return SessionHoverPreview.make(
-      session: session,
-      customName: customName,
-      repositories: repositories
-    )
-  }
-
   private var observationStartupDelayMilliseconds: Int {
     let bucket = session.id.unicodeScalars.reduce(0) { partialResult, scalar in
       (partialResult + Int(scalar.value)) % 1_500
@@ -112,32 +156,57 @@ struct CollapsibleSessionRow: View {
 
   // MARK: - Body
 
+  @State private var isRowHovered = false
+
   var body: some View {
     HStack(spacing: 8) {
-      // Status dot
-      Circle()
-        .fill(statusColor)
-        .frame(width: 6, height: 6)
-        .scaleEffect(shouldPulse ? pulseScale : 1.0)
-        .animation(.easeInOut(duration: 0.35), value: statusColor)
+      statusIndicator
 
       // Content
       VStack(alignment: .leading, spacing: 2) {
-        // Row 1: name + provider + status + time
-        HStack(spacing: 6) {
-          Text(displayName)
-            .font(.secondarySmall)
-            .foregroundColor(.secondary.opacity(0.7))
+        // Row 1: the human work item, not the repeated launch prompt.
+        HStack(spacing: 4) {
+          Text(presentation.title)
+            .font(.secondaryDefault)
+            .foregroundColor(.primary)
             .lineLimit(1)
             .layoutPriority(1)
+
+          Spacer(minLength: 4)
+
+          if let onArchive, !isPending {
+            SessionRowArchiveButton(isVisible: isRowHovered, action: onArchive)
+          }
+        }
+
+        // Row 2: repository, pull request and branch context, followed by live state.
+        HStack(spacing: 6) {
+          if !presentation.context.isEmpty {
+            if presentation.linkedPullRequest != nil {
+              Label(presentation.context, systemImage: "arrow.triangle.pull")
+                .font(.secondarySmall)
+                .foregroundColor(.blue.opacity(0.9))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
+                .help(presentation.context)
+            } else {
+              Text(presentation.context)
+                .font(.secondarySmall)
+                .foregroundColor(.secondary.opacity(0.8))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
+            }
+          }
+
+          Spacer(minLength: 4)
 
           Text(providerKind.rawValue)
             .font(.secondaryCaption)
             .foregroundColor(isPrimary ? .white : .brandPrimary(for: providerKind).opacity(0.8))
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
-
-          Spacer(minLength: 4)
 
           statusLabel
             .lineLimit(1)
@@ -152,26 +221,12 @@ struct CollapsibleSessionRow: View {
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
         }
-
-        // Row 2: message + actions
-        HStack(spacing: 0) {
-          if let message = session.firstMessage, !message.isEmpty {
-            Text(message)
-              .font(.secondaryDefault)
-              .foregroundColor(.primary)
-              .lineLimit(1)
-              .truncationMode(.tail)
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-
-          Spacer(minLength: 4)
-
-          actionsView
-            .fixedSize(horizontal: true, vertical: false)
-            .opacity(showActions ? 1 : 0)
-            .animation(.easeInOut(duration: 0.25), value: showActions)
-        }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        SessionWorkflowAssociationBadge(
+          session: session,
+          providerKind: providerKind
+        )
 
         if let pullRequest = sessionGitHubQuickAccessViewModel.currentBranchPR {
           GitHubSessionRowStatusLine(
@@ -190,36 +245,20 @@ struct CollapsibleSessionRow: View {
     .padding(.vertical, 8)
     .contentShape(Rectangle())
     .onTapGesture { onSelect() }
+    .onHover { hovering in
+      withAnimation(.easeOut(duration: 0.12)) { isRowHovered = hovering }
+    }
     .background(
       RoundedRectangle(cornerRadius: 6)
         .fill(rowBackground)
         .animation(.easeInOut(duration: 0.3), value: isPending)
     )
-    .onHover { hovering in
-      withAnimation(.easeInOut(duration: 0.12)) {
-        isHovered = hovering
-      }
-      if !hovering && showArchiveConfirm {
-        withAnimation(.easeInOut(duration: 0.15)) {
-          showArchiveConfirm = false
-        }
-      }
-    }
-    .task(id: isHovered) {
-      guard isHovered, !isPending else {
-        showHoverPreview = false
-        return
-      }
-      try? await Task.sleep(for: .milliseconds(600))
-      guard !Task.isCancelled else { return }
-      showHoverPreview = true
-    }
-    .popover(isPresented: $showHoverPreview, arrowEdge: .trailing) {
-      SessionHoverPreviewCard(
-        preview: hoverPreview,
-        timestamp: timestamp,
-        gitHubViewModel: sessionGitHubQuickAccessViewModel
-      )
+    .overlay {
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(
+          attention == nil ? Color.clear : Color.orange.opacity(colorScheme == .dark ? 0.42 : 0.32),
+          lineWidth: 1
+        )
     }
     .onAppear { startPulseAnimation() }
     .onChange(of: sessionStatus) { _, _ in startPulseAnimation() }
@@ -236,11 +275,27 @@ struct CollapsibleSessionRow: View {
         await sessionGitHubQuickAccessViewModel.notifySessionActivity(at: newValue)
       }
     }
+    .sessionManagementActions(
+      session: session,
+      providerKind: providerKind,
+      customName: customName,
+      isPending: isPending,
+      isPinned: isPinned,
+      onPin: onPin,
+      onArchive: onArchive
+    )
   }
 
   @ViewBuilder
   private var statusLabel: some View {
-    if let sessionStatus {
+    if let attention {
+      Label(attention.displayName, systemImage: attention.systemImage)
+        .font(.secondaryCaption)
+        .foregroundColor(statusColor)
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        .id("attention-\(attention.rawValue)")
+        .accessibilityLabel(attention.displayName)
+    } else if let sessionStatus {
       Text(statusDisplayText(sessionStatus))
         .font(.secondaryCaption)
         .foregroundColor(statusColor)
@@ -257,65 +312,32 @@ struct CollapsibleSessionRow: View {
 
   // MARK: - Subviews
 
-  private var rowBackground: Color {
-    if isPrimary && isHovered {
-      return Color.brandPrimary(for: providerKind).opacity(colorScheme == .dark ? 0.28 : 0.85)
+  @ViewBuilder
+  private var statusIndicator: some View {
+    if let attention {
+      Image(systemName: attention.systemImage)
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundColor(statusColor)
+        .frame(width: 10, height: 10)
+        .accessibilityHidden(true)
+    } else {
+      Circle()
+        .fill(statusColor)
+        .frame(width: 6, height: 6)
+        .scaleEffect(shouldPulse ? pulseScale : 1.0)
+        .animation(.easeInOut(duration: 0.35), value: statusColor)
+        .accessibilityHidden(true)
     }
+  }
+
+  private var rowBackground: Color {
     if isPrimary {
       return Color.brandPrimary(for: providerKind).opacity(colorScheme == .dark ? 0.2 : 0.75)
     }
-    if isHovered {
-      return Color.brandPrimary(for: providerKind).opacity(colorScheme == .dark ? 0.12 : 0.35)
+    if attention != nil {
+      return Color.orange.opacity(colorScheme == .dark ? 0.10 : 0.07)
     }
     return .clear
-  }
-
-  @ViewBuilder
-  private var actionsView: some View {
-    HStack(spacing: 2) {
-      if let onPin {
-        Button(action: onPin) {
-          Image(systemName: isPinned ? "pin.fill" : "pin")
-            .font(.system(size: 10))
-            .foregroundColor(.secondary)
-            .frame(width: 18, height: 18)
-        }
-        .buttonStyle(.plain)
-        .help(isPinned ? "Unpin session" : "Pin session")
-      }
-
-      if let onArchive {
-        if showArchiveConfirm {
-          Button {
-            showArchiveConfirm = false
-            onArchive()
-          } label: {
-            Text("Confirm")
-              .font(.secondaryCaption)
-              .foregroundColor(colorScheme == .dark ? .black : .white)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 2)
-              .background(colorScheme == .dark ? Color.white : Color.black)
-              .clipShape(RoundedRectangle(cornerRadius: 4))
-          }
-          .buttonStyle(.plain)
-          .transition(.opacity.combined(with: .scale(scale: 0.8)))
-        } else {
-          Button {
-            withAnimation(.easeInOut(duration: 0.15)) {
-              showArchiveConfirm = true
-            }
-          } label: {
-            Image(systemName: "archivebox")
-              .font(.system(size: 10))
-              .foregroundColor(.secondary)
-              .frame(width: 18, height: 18)
-          }
-          .buttonStyle(.plain)
-          .help("Archive session")
-        }
-      }
-    }
   }
 
   // MARK: - Animations
@@ -336,7 +358,7 @@ struct CollapsibleSessionRow: View {
 
     withAnimation(
       .easeInOut(duration: 1.0)
-      .repeatForever(autoreverses: true)
+        .repeatForever(autoreverses: true)
     ) {
       pulseScale = 1.4
     }
@@ -452,7 +474,7 @@ struct CollapsibleSessionRow: View {
             colorScheme: .dark,
             isPinned: idx == 0,
             onPin: {},
-            onArchive: state.1 ? nil : {},            onSelect: {}
+            onArchive: state.1 ? nil : {}, onSelect: {}
           )
         }
       }
@@ -474,7 +496,7 @@ struct CollapsibleSessionRow: View {
             colorScheme: .dark,
             isPinned: false,
             onPin: {},
-            onArchive: {},            onSelect: {}
+            onArchive: {}, onSelect: {}
           )
         }
       }
@@ -495,7 +517,7 @@ struct CollapsibleSessionRow: View {
           colorScheme: .light,
           isPinned: false,
           onPin: {},
-          onArchive: {},          onSelect: {}
+          onArchive: {}, onSelect: {}
         )
         .environment(\.colorScheme, .light)
 
@@ -510,7 +532,7 @@ struct CollapsibleSessionRow: View {
           colorScheme: .light,
           isPinned: false,
           onPin: {},
-          onArchive: {},          onSelect: {}
+          onArchive: {}, onSelect: {}
         )
         .environment(\.colorScheme, .light)
 
@@ -525,7 +547,7 @@ struct CollapsibleSessionRow: View {
           colorScheme: .light,
           isPinned: false,
           onPin: {},
-          onArchive: {},          onSelect: {}
+          onArchive: {}, onSelect: {}
         )
         .environment(\.colorScheme, .light)
       }
@@ -546,4 +568,35 @@ private func sectionHeader(_ title: String) -> some View {
     .foregroundColor(.secondary)
     .textCase(.uppercase)
     .frame(maxWidth: .infinity, alignment: .leading)
+}
+
+// MARK: - SessionRowArchiveButton
+
+/// Hover-only archive action on a sidebar session row. Kept in the layout (just
+/// transparent) when hidden so the title doesn't shift as the pointer moves.
+private struct SessionRowArchiveButton: View {
+  let isVisible: Bool
+  let action: () -> Void
+
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: "archivebox")
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(isHovered ? .primary : .secondary)
+        .frame(width: 20, height: 18)
+        .background(
+          RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(Color.primary.opacity(isHovered ? 0.12 : 0))
+        )
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .opacity(isVisible ? 1 : 0)
+    .allowsHitTesting(isVisible)
+    .onHover { isHovered = $0 }
+    .help("Archive session")
+    .accessibilityLabel("Archive session")
+  }
 }

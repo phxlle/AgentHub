@@ -451,6 +451,18 @@ public struct CodexSessionJSONLParser {
 
     let timeSince = Date().timeIntervalSince(lastActivity.timestamp)
 
+    // Codex records an interactive question as a pending
+    // `request_user_input` function call. It must remain visible until a
+    // matching function_call_output arrives, even if the question is older
+    // than the generic idle timeout.
+    if case .toolUse(let name) = lastActivity.type,
+      SessionInteractiveInputTool.matches(name),
+      result.pendingToolUses.values.contains(where: { $0.toolName == name })
+    {
+      result.currentStatus = .awaitingApproval(tool: name)
+      return
+    }
+
     if timeSince > 300 {
       result.currentStatus = .idle
       return

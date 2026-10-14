@@ -20,6 +20,20 @@ struct SessionJSONLParserRetentionTests {
     #expect(result.lastAssistantMessage == "Implementation complete.\nAll tests pass.")
   }
 
+  @Test("Treats Claude AskUserQuestion as input instead of approval")
+  func detectsClaudeUserQuestion() {
+    let timestamp = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600))
+    let line = """
+      {"type":"assistant","timestamp":"\(timestamp)","message":{"role":"assistant","content":[{"type":"tool_use","id":"question-1","name":"AskUserQuestion","input":{"questions":[]}}]}}
+      """
+
+    var result = SessionJSONLParser.ParseResult()
+    SessionJSONLParser.parseNewLines([line], into: &result)
+
+    #expect(result.currentStatus == .awaitingApproval(tool: "AskUserQuestion"))
+    #expect(SidebarSessionAttention(status: result.currentStatus) == .inputRequired)
+  }
+
   @Test("Compacts older code change activities but keeps the newest five detailed")
   func compactsOlderCodeChangeActivities() {
     let lines = (1...7).map { index in

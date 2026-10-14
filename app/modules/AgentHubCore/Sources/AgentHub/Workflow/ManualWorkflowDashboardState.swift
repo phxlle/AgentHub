@@ -43,6 +43,7 @@ struct ManualWorkflowDefinition: Codable, Identifiable, Sendable, Equatable {
 struct ManualWorkflowDashboardState: Codable, Sendable, Equatable {
   var workflows: [ManualWorkflowDefinition] = []
   var sessionAssignments: [String: String] = [:]
+  var sessionRoleOverrides: [String: DetectedAgentRole] = [:]
   var dismissedSessionIDs: Set<String> = []
   var automatedReviews: [String: AutomatedReviewRecord] = [:]
   var archivedWorkflowIDs: Set<String> = []
@@ -50,6 +51,7 @@ struct ManualWorkflowDashboardState: Codable, Sendable, Equatable {
   private enum CodingKeys: String, CodingKey {
     case workflows
     case sessionAssignments
+    case sessionRoleOverrides
     case dismissedSessionIDs
     case automatedReviews
     case archivedWorkflowIDs
@@ -64,6 +66,9 @@ struct ManualWorkflowDashboardState: Codable, Sendable, Equatable {
       ?? []
     sessionAssignments =
       try container.decodeIfPresent([String: String].self, forKey: .sessionAssignments) ?? [:]
+    sessionRoleOverrides =
+      try container.decodeIfPresent([String: DetectedAgentRole].self, forKey: .sessionRoleOverrides)
+      ?? [:]
     dismissedSessionIDs =
       try container.decodeIfPresent(Set<String>.self, forKey: .dismissedSessionIDs) ?? []
     automatedReviews =

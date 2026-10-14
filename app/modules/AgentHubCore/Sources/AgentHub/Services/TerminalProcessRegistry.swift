@@ -119,6 +119,7 @@ public actor TerminalProcessRegistry {
   private enum CleanupScope {
     case allRegistered
     case orphanedTerminals(provider: SessionProviderKind?, activePIDs: Set<Int32>)
+    case sessionTerminals(provider: SessionProviderKind, sessionId: String)
   }
 
   private let processInspector: any ProcessInspecting
@@ -239,6 +240,13 @@ public actor TerminalProcessRegistry {
     )
   }
 
+  /// Terminates the terminal processes registered for one session. Archive's
+  /// safety net: a terminal that never mounted (e.g. a bulk-launched review) can
+  /// outlive the UI terminal map; its registered row still identifies it.
+  public func terminateSessionTerminalProcesses(provider: SessionProviderKind, sessionId: String) async {
+    await cleanupManagedProcesses(scope: .sessionTerminals(provider: provider, sessionId: sessionId))
+  }
+
   private func cleanupManagedProcesses(scope: CleanupScope) async {
     guard let store = await resolvedProcessStore() else { return }
 
@@ -284,6 +292,10 @@ public actor TerminalProcessRegistry {
       guard row.processKind?.isTerminalProcess == true else { return false }
       guard matchesProvider(row, provider: provider) else { return false }
       return !activePIDs.contains(row.pid)
+    case .sessionTerminals(let provider, let sessionId):
+      guard row.processKind?.isTerminalProcess == true else { return false }
+      guard matchesProvider(row, provider: provider) else { return false }
+      return row.sessionId == sessionId
     }
   }
 
