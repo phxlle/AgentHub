@@ -418,6 +418,10 @@ public final class AgentHubProvider {
     sessionStore: metadataStore
   )
 
+  /// Subagents a session started (Claude Task agents, Codex spawn_agent threads).
+  public private(set) lazy var subagentDiscoveryService: any SubagentDiscoveryServiceProtocol =
+    SubagentDiscoveryService(codexDataPath: configuration.codexDataPath)
+
   /// Open-sprint Jira tickets that can be handed to Claude or Codex.
   public private(set) lazy var jiraSprintViewModel = JiraSprintViewModel(
     pullRequestSearch: gitHubProjectReviewService,

@@ -326,6 +326,13 @@ public struct MonitoringCardView: View {
       // Terminal content
       Divider()
 
+      SessionSubagentsSection(
+        session: session,
+        providerKind: providerKind,
+        refreshTrigger: state?.lastActivityAt,
+        service: hubProvider?.subagentDiscoveryService
+      )
+
       monitorContent
 
       ResourceLinksPanel(

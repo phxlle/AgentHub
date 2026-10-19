@@ -197,6 +197,31 @@ struct JiraSprintViewModelTests {
     #expect(viewModel.sprintTickets.first { $0.key == "XFA-1" }?.status == "Done")
   }
 
+  @Test("A sync in progress can be cancelled and started again")
+  func syncCancelAndRestart() async {
+    let search = PullRequestSearchStub()
+    await search.setDelay(.seconds(30))
+    let viewModel = JiraSprintViewModel(
+      service: MockJiraSprintService(tickets: Self.sprintTickets), pullRequestSearch: search,
+      userDefaults: Self.makeDefaults())
+    viewModel.assigneeFilter = .everyone
+    await viewModel.load()
+
+    viewModel.startSync(openSessionKeys: [])
+    for _ in 0..<50 where !viewModel.isPlanningSync { try? await Task.sleep(for: .milliseconds(10)) }
+    #expect(viewModel.isPlanningSync)
+
+    viewModel.cancelSyncPlanning()
+    #expect(!viewModel.isPlanningSync)
+    #expect(viewModel.syncPlan == nil)
+
+    await search.setDelay(nil)
+    viewModel.startSync(openSessionKeys: ["XFA-4"])
+    for _ in 0..<100 where viewModel.syncPlan == nil { try? await Task.sleep(for: .milliseconds(10)) }
+    #expect(viewModel.syncPlan?.map(\.key) == ["XFA-4"])
+    #expect(!viewModel.isPlanningSync)
+  }
+
   @Test("Sessions started from the board get the ticket as their name")
   func sessionNames() {
     let viewModel = JiraSprintViewModel(service: MockJiraSprintService(), userDefaults: Self.makeDefaults())
@@ -338,11 +363,17 @@ private actor PullRequestSearchStub: GitHubProjectReviewServiceProtocol {
   private(set) var queries: [String] = []
   private var ticketPullRequests: [String: [GitHubTicketPullRequest]] = [:]
 
+  private var delay: Duration?
+
   func setTicketPullRequests(_ value: [String: [GitHubTicketPullRequest]]) { ticketPullRequests = value }
+  func setDelay(_ value: Duration?) { delay = value }
 
   func ticketPullRequests(forKeys keys: [String], owner: String?) async throws
     -> [String: [GitHubTicketPullRequest]]
-  { ticketPullRequests.filter { keys.contains($0.key) } }
+  {
+    if let delay { try await Task.sleep(for: delay) }
+    return ticketPullRequests.filter { keys.contains($0.key) }
+  }
 
   static func pullRequest(_ key: String, state: String) -> GitHubProjectPullRequest {
     GitHubProjectPullRequest(

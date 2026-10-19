@@ -141,6 +141,41 @@ struct GitHubReviewsViewModelTests {
     #expect(viewModel.bulkReviewCandidates([mine, theirs, unknownAuthor]).map(\.id) == ["theirs", "ghost"])
   }
 
+  @Test("Follow-ups: re-review targets others' PRs, resolve targets yours, both need a ready session")
+  func followUpTargets() async {
+    let service = GitHubProjectReviewServiceStub()
+    service.projects = [makeProject()]
+    service.login = "phxlle"
+    let viewModel = GitHubReviewsViewModel(service: service, userDefaults: isolatedDefaults())
+    func link(_ id: String, pending: Bool = false) -> GitHubReviewSessionLink {
+      GitHubReviewSessionLink(
+        provider: .codex, session: makeSession(id: id, date: .now, message: nil),
+        itemID: "codex-\(id)", isPending: pending, displayName: id, status: nil)
+    }
+    let rows = [
+      GitHubReviewTableRow(pullRequest: makePullRequest(id: "theirs", isDraft: false, author: "lvlrt"), sessionLinks: [link("r1")]),
+      GitHubReviewTableRow(pullRequest: makePullRequest(id: "mine", isDraft: false, author: "phxlle"), sessionLinks: [link("i1")]),
+      GitHubReviewTableRow(pullRequest: makePullRequest(id: "mine-no-session", isDraft: false, author: "phxlle"), sessionLinks: []),
+      GitHubReviewTableRow(pullRequest: makePullRequest(id: "theirs-starting", isDraft: false, author: "x"), sessionLinks: [link("p1", pending: true)]),
+    ]
+
+    #expect(viewModel.followUpTargets(rows, kind: .reReview).isEmpty)  // login unknown yet
+
+    await viewModel.load()
+    #expect(viewModel.followUpTargets(rows, kind: .reReview).map(\.pullRequest.id) == ["theirs"])
+    #expect(viewModel.followUpTargets(rows, kind: .resolveComments).map(\.pullRequest.id) == ["mine"])
+    #expect(viewModel.followUpTargets(rows, kind: .resolveComments).first?.link.session.id == "i1")
+  }
+
+  @Test("Resolve-comments prompt targets the PR and spares the GitHub API")
+  func resolvePrompt() {
+    let prompt = GitHubReviewFollowUpPromptBuilder.resolveRequestedChanges(
+      makePullRequest(id: "mine", isDraft: false))
+    #expect(prompt.contains("Reviewers requested changes"))
+    #expect(prompt.contains("https://github.com/gl-ventures/xfa-native-mobile/pull/450"))
+    #expect(prompt.contains("GitHub API budget"))
+  }
+
   @Test("Bulk launch targets only pull requests without a linked session")
   func bulkLaunchTargets() {
     let linked = GitHubReviewTableRow(

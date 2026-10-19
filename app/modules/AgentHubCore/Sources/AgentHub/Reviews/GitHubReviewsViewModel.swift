@@ -150,6 +150,27 @@ public final class GitHubReviewsViewModel {
     viewerLogin = await login
   }
 
+  /// Whether `pullRequest` is yours. Unknown login → nil, so callers can refuse to guess.
+  func isOwnPullRequest(_ pullRequest: GitHubProjectPullRequest) -> Bool? {
+    guard let viewerLogin else { return nil }
+    return pullRequest.authorLogin?.caseInsensitiveCompare(viewerLogin) == .orderedSame
+  }
+
+  /// Rows whose existing session should get a follow-up: others' PRs for a re-review,
+  /// your own PRs for resolving requested changes. Each pairs with its most recent
+  /// ready session; rows without one are left out.
+  func followUpTargets(
+    _ rows: [GitHubReviewTableRow],
+    kind: GitHubReviewBulkFollowUp.Kind
+  ) -> [GitHubReviewBulkFollowUp.Target] {
+    rows.compactMap { row in
+      guard let isOwn = isOwnPullRequest(row.pullRequest) else { return nil }
+      guard isOwn == (kind == .resolveComments) else { return nil }
+      guard let link = row.sessionLinks.first(where: { !$0.isPending }) else { return nil }
+      return GitHubReviewBulkFollowUp.Target(pullRequest: row.pullRequest, link: link)
+    }
+  }
+
   /// Pull requests a bulk review should start on: authored by someone else.
   /// Empty while your login is unknown, so your own PRs are never included by accident.
   func bulkReviewCandidates(_ pullRequests: [GitHubProjectPullRequest]) -> [GitHubProjectPullRequest] {

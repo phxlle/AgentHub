@@ -20,11 +20,15 @@ struct JiraSprintView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      JiraSprintHeader(viewModel: viewModel) {
-        let openSessionKeys = Set(
-          linkedSessions.filter { $0.value.contains { $0.isMonitored } }.keys)
-        Task { await viewModel.planSync(openSessionKeys: openSessionKeys) }
-      }
+      JiraSprintHeader(
+        viewModel: viewModel,
+        onSync: {
+          let openSessionKeys = Set(
+            linkedSessions.filter { $0.value.contains { $0.isMonitored } }.keys)
+          viewModel.startSync(openSessionKeys: openSessionKeys)
+        },
+        onCancelSync: viewModel.cancelSyncPlanning
+      )
       content
     }
     .overlay(alignment: .top) {

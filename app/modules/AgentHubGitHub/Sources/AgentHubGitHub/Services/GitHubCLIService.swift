@@ -604,9 +604,15 @@ public actor GitHubCLIService {
             }
           }
 
-          process.waitUntilExit()
-          readGroup.wait()
-          continuation.resume(returning: timedOut)
+          // Bounded, never `waitUntilExit()`: in this app other code (embedded
+          // terminals) can reap children, and then `waitUntilExit()` never
+          // returns even though the process is gone. That hung Sprint sync forever.
+          let exitDeadline = Date().addingTimeInterval(2)
+          while process.isRunning, Date() < exitDeadline {
+            Thread.sleep(forTimeInterval: 0.05)
+          }
+          _ = readGroup.wait(timeout: .now() + 2)
+          continuation.resume(returning: timedOut || process.isRunning)
         }
       }
     } onCancel: {

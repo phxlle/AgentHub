@@ -38,6 +38,7 @@ struct GitHubReviewsView: View {
   @State private var sessionCommandFeedbackTask: Task<Void, Never>?
   @State private var customMessageContext: GitHubReviewCustomMessageContext?
   @State private var pendingBulkLaunch: GitHubReviewBulkLaunch?
+  @State private var pendingFollowUp: GitHubReviewBulkFollowUp?
 
   init(
     viewModel: GitHubReviewsViewModel,
@@ -108,6 +109,19 @@ struct GitHubReviewsView: View {
       Button("Cancel", role: .cancel) { pendingBulkLaunch = nil }
     } message: { launch in
       Text(launch.message)
+    }
+    .confirmationDialog(
+      pendingFollowUp?.title ?? "",
+      isPresented: Binding(
+        get: { pendingFollowUp != nil },
+        set: { if !$0 { pendingFollowUp = nil } }
+      ),
+      presenting: pendingFollowUp
+    ) { followUp in
+      Button("Send to \(followUp.targets.count) sessions") { runFollowUp(followUp) }
+      Button("Cancel", role: .cancel) { pendingFollowUp = nil }
+    } message: { followUp in
+      Text(followUp.message)
     }
     .onDisappear {
       sessionCommandFeedbackTask?.cancel()
@@ -294,6 +308,8 @@ struct GitHubReviewsView: View {
         .lineLimit(1)
         .transition(.opacity)
       }
+      followUpButton(.reReview)
+      followUpButton(.resolveComments)
       bulkLaunchMenu
       Button {
         applySuggestedOrder()
@@ -668,6 +684,50 @@ struct GitHubReviewsView: View {
           : "Start one session per pull request by someone else that has no linked session yet (yours are skipped)")
   }
 
+  /// Re-review (others' PRs) or resolve comments (yours) in the sessions that exist.
+  @ViewBuilder
+  private func followUpButton(_ kind: GitHubReviewBulkFollowUp.Kind) -> some View {
+    let rows = sortedReviewRows(inventories: reviewSessionInventories)
+    let targets = viewModel.followUpTargets(rows, kind: kind)
+    if !targets.isEmpty {
+      Button {
+        let skipped =
+          kind == .resolveComments
+          ? rows.filter { viewModel.isOwnPullRequest($0.pullRequest) == true }.count - targets.count
+          : 0
+        pendingFollowUp = GitHubReviewBulkFollowUp(
+          kind: kind, targets: targets, skippedWithoutSession: max(0, skipped))
+      } label: {
+        switch kind {
+        case .reReview:
+          Label("Re-review \(targets.count)", systemImage: "arrow.clockwise.circle")
+        case .resolveComments:
+          Label("Resolve comments \(targets.count)", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+        }
+      }
+      .buttonStyle(.borderless)
+      .help(
+        kind == .reReview
+          ? "Ask the existing review sessions to review the latest version of these pull requests by others"
+          : "Ask the existing sessions on your own pull requests to resolve the requested changes")
+    }
+  }
+
+  private func runFollowUp(_ followUp: GitHubReviewBulkFollowUp) {
+    pendingFollowUp = nil
+    var sent = 0
+    for target in followUp.targets where canSendCommand(to: target.link) {
+      if sessionsViewModel(for: target.link.provider).sendAutomatedPrompt(
+        to: target.link.session, prompt: followUp.prompt(for: target))
+      {
+        sent += 1
+      }
+    }
+    showSessionCommandFeedback(
+      "Sent to \(sent) of \(followUp.targets.count) sessions",
+      isError: sent < followUp.targets.count)
+  }
+
   private func runBulkLaunch(_ launch: GitHubReviewBulkLaunch) {
     pendingBulkLaunch = nil
     Task {
@@ -997,6 +1057,50 @@ struct GitHubReviewsView: View {
         if let id { viewModel.selectView(id: id) }
       }
     )
+  }
+}
+
+struct GitHubReviewBulkFollowUp: Identifiable {
+  enum Kind { case reReview, resolveComments }
+
+  struct Target {
+    let pullRequest: GitHubProjectPullRequest
+    let link: GitHubReviewSessionLink
+  }
+
+  let id = UUID()
+  let kind: Kind
+  let targets: [Target]
+  /// Your own pull requests in view that have no session to send to.
+  let skippedWithoutSession: Int
+
+  var title: String {
+    switch kind {
+    case .reReview: return "Re-review \(targets.count) pull requests?"
+    case .resolveComments: return "Resolve comments on \(targets.count) of your pull requests?"
+    }
+  }
+
+  var message: String {
+    var text: String
+    switch kind {
+    case .reReview:
+      text = "Each existing review session fetches the latest head and reviews the pull request again."
+    case .resolveComments:
+      text = "Each existing session that worked on the pull request picks up the requested changes."
+    }
+    if skippedWithoutSession > 0 {
+      text += " \(skippedWithoutSession) without a session are skipped."
+    }
+    return text
+  }
+
+  func prompt(for target: Target) -> String {
+    switch kind {
+    case .reReview: return GitHubReviewFollowUpPromptBuilder.pullAndReviewAgain(target.pullRequest)
+    case .resolveComments:
+      return GitHubReviewFollowUpPromptBuilder.resolveRequestedChanges(target.pullRequest)
+    }
   }
 }
 

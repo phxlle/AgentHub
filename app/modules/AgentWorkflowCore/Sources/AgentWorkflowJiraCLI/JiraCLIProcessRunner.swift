@@ -79,10 +79,16 @@ public actor JiraCLIProcessRunner: JiraCLICommandRunning {
     return environment
   }
 
+  /// The browser login waits for the user, so it gets longer.
+  static func timeout(for arguments: [String]) -> TimeInterval {
+    arguments.starts(with: ["jira", "auth", "login"]) ? 300 : 60
+  }
+
   private nonisolated static func runSynchronously(
     executableURL: URL,
     arguments: [String]
   ) throws -> JiraCLICommandResult {
+    let timeout = timeout(for: Array(arguments.drop { $0 != "jira" }))
     let temporaryDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("agenthub-jira-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(
@@ -111,7 +117,17 @@ public actor JiraCLIProcessRunner: JiraCLICommandRunning {
     process.standardOutput = outputHandle
     process.standardError = errorHandle
     try process.run()
-    process.waitUntilExit()
+    // Bounded wait instead of `waitUntilExit()`, which never returns when another
+    // part of the host app reaps the child (embedded terminals do).
+    let deadline = Date().addingTimeInterval(timeout)
+    while process.isRunning, Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    if process.isRunning {
+      process.terminate()
+      throw JiraTicketReaderError.commandFailed(
+        exitCode: -1, message: "acli did not respond within \(Int(timeout)) seconds")
+    }
     try outputHandle.synchronize()
     try errorHandle.synchronize()
 

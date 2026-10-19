@@ -43,3 +43,12 @@ struct JiraCLIProcessRunnerTests {
     #expect(environment["HOME"] == "/Users/me")
   }
 }
+
+@Suite("Jira CLI timeouts")
+struct JiraCLITimeoutTests {
+  @Test("Commands time out after a minute; the browser login gets five")
+  func timeouts() {
+    #expect(JiraCLIProcessRunner.timeout(for: ["jira", "workitem", "search"]) == 60)
+    #expect(JiraCLIProcessRunner.timeout(for: ["jira", "auth", "login", "--web"]) == 300)
+  }
+}

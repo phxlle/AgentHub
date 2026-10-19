@@ -477,12 +477,27 @@ public final class JiraSprintViewModel {
     }
   }
 
+  @ObservationIgnored private var syncTask: Task<Void, Never>?
+
+  /// Starts planning a sync; a running plan is cancelled first, so Sync always restarts.
+  public func startSync(openSessionKeys: Set<String>) {
+    syncTask?.cancel()
+    syncTask = Task { await planSync(openSessionKeys: openSessionKeys) }
+  }
+
+  /// Stops a plan in progress: the spinner clears right away and Sync can start again.
+  public func cancelSyncPlanning() {
+    syncTask?.cancel()
+    syncTask = nil
+    isPlanningSync = false
+  }
+
   /// Works out which visible tickets should move, from their PRs (GitHub search)
   /// and open agent sessions. Nothing changes in Jira until `applySync()`.
   public func planSync(openSessionKeys: Set<String>) async {
-    guard let pullRequestSearch, !isPlanningSync else { return }
+    guard let pullRequestSearch else { return }
     isPlanningSync = true
-    defer { isPlanningSync = false }
+    defer { if !Task.isCancelled { isPlanningSync = false } }
     let tickets = filteredTickets.filter { $0.statusCategory != "done" }
     guard !tickets.isEmpty else {
       syncPlan = []
@@ -495,7 +510,9 @@ public final class JiraSprintViewModel {
       for (key, linked) in pullRequests {
         pullRequestsByTicket[key] = linked.map(\.pullRequest)
       }
+      try Task.checkCancellation()
       let statuses = await workflowStatuses()
+      try Task.checkCancellation()
       var changes: [SyncChange] = []
       var skipped: [String] = []
       for ticket in tickets {
@@ -518,7 +535,10 @@ public final class JiraSprintViewModel {
       }
       syncPlan = changes
       syncSkipped = skipped
+    } catch is CancellationError {
+      return
     } catch {
+      guard !Task.isCancelled else { return }
       statusNotice = StatusNotice(
         ticketKey: "", text: "Sync failed: \(Self.message(for: error))", isError: true)
     }

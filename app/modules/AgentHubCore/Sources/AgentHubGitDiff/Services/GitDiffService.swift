@@ -933,11 +933,15 @@ public actor GitDiffService: GitDiffServiceProtocol {
       group.addTask {
         await withCheckedContinuation { continuation in
           DispatchQueue.global().async {
-            // Wait for reads first
-            readGroup.wait()
-            // Then wait for process to exit
-            process.waitUntilExit()
-            continuation.resume(returning: false)
+            // Bounded waits, never `waitUntilExit()`: when another part of the app
+            // reaps the child it never returns, and this task group would then
+            // wait on this child forever even after the timeout task fired.
+            let deadline = DispatchTime.now() + timeout + 2
+            _ = readGroup.wait(timeout: deadline)
+            while process.isRunning, DispatchTime.now() < deadline {
+              Thread.sleep(forTimeInterval: 0.02)
+            }
+            continuation.resume(returning: process.isRunning)
           }
         }
       }
@@ -963,7 +967,8 @@ public actor GitDiffService: GitDiffServiceProtocol {
     let output = String(data: outputData ?? Data(), encoding: .utf8) ?? ""
     let errorOutput = String(data: errorData ?? Data(), encoding: .utf8) ?? ""
 
-    if didTimeout {
+    // `terminationStatus` raises for a process Foundation still thinks is running.
+    if didTimeout || process.isRunning {
       throw GitDiffError.timeout
     }
 

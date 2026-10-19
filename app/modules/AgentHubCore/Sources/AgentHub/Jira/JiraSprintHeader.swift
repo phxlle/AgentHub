@@ -11,6 +11,7 @@ import SwiftUI
 struct JiraSprintHeader: View {
   @Bindable var viewModel: JiraSprintViewModel
   var onSync: () -> Void = {}
+  var onCancelSync: () -> Void = {}
 
   var body: some View {
     VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
@@ -28,23 +29,32 @@ struct JiraSprintHeader: View {
     .padding(.bottom, DesignTokens.Spacing.md)
   }
 
+  @ViewBuilder
   private var syncButton: some View {
-    Button(action: onSync) {
-      HStack(spacing: 5) {
-        if viewModel.isPlanningSync {
+    if viewModel.isPlanningSync {
+      Button(action: onCancelSync) {
+        HStack(spacing: 5) {
           ProgressView().controlSize(.mini)
-        } else {
-          Image(systemName: "arrow.triangle.2.circlepath")
+          Text("Cancel sync")
         }
-        Text("Sync")
+        .font(.geist(size: 12, weight: .medium))
       }
-      .font(.geist(size: 12, weight: .medium))
+      .buttonStyle(.bordered)
+      .help("Stop checking pull requests; you can start Sync again")
+    } else {
+      Button(action: onSync) {
+        HStack(spacing: 5) {
+          Image(systemName: "arrow.triangle.2.circlepath")
+          Text("Sync")
+        }
+        .font(.geist(size: 12, weight: .medium))
+      }
+      .buttonStyle(.bordered)
+      .disabled(viewModel.state != .loaded)
+      .help(
+        "Move the tickets you see to match their pull requests and open sessions. You review the changes before anything moves in Jira."
+      )
     }
-    .buttonStyle(.bordered)
-    .disabled(viewModel.isPlanningSync || viewModel.state != .loaded)
-    .help(
-      "Move the tickets you see to match their pull requests and open sessions. You review the changes before anything moves in Jira."
-    )
   }
 
   private var refreshButton: some View {
