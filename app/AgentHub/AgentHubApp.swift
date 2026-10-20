@@ -145,6 +145,11 @@ struct AgentHubApp: App {
     // Must run before any terminal/watcher/subprocess spawns: Finder-launched
     // apps inherit a 256 open-file soft limit, which a busy hub exhausts.
     FileDescriptorLimits.raiseSoftLimit()
+    // Launched from inside a Claude Code session? Drop its identity markers, or
+    // every Claude session started here skips its transcript and never resolves.
+    InheritedAgentSessionEnvironment.scrubFromProcess()
+    // Logs beach balls with recent activity (category "Performance").
+    MainThreadStallMonitor.shared.start()
   }
 
   var body: some Scene {
@@ -180,6 +185,11 @@ struct AgentHubApp: App {
         .keyboardShortcut("4", modifiers: .command)
 
         Divider()
+
+        Button("Resume Session by ID…") {
+          AgentHubAppCommand.resumeSessionByID()
+        }
+        .keyboardShortcut("r", modifiers: [.command, .shift])
 
         Button("Archive Current Session") {
           AgentHubAppCommand.archiveCurrentSession()

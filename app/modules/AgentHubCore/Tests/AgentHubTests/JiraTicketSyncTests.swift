@@ -62,4 +62,32 @@ struct JiraTicketSyncTests {
     #expect(GitHubReviewSessionLinker.links(for: pullRequest, launches: [], inventories: [other]).isEmpty)
     #expect(GitHubReviewSessionLinker.ticketKeys(inTitle: "xfa-1 and XFA-22: x") == ["XFA-22"])
   }
+
+  @Test("A ticket session only links to PRs in its own repository")
+  func ticketSessionsStayInTheirRepository() {
+    let orgSession = CLISession(
+      id: "org", projectPath: "/Users/me/Github/xfa-organizations-service", branchName: "xfa-3119-x",
+      lastActivityAt: .now)
+    let worktreeSession = CLISession(
+      id: "wt", projectPath: "/Users/me/Github/xfa-web-flow-xfa-3119", branchName: "xfa-3119-y",
+      lastActivityAt: .now)
+    func pr(_ repo: String) -> GitHubProjectPullRequest {
+      GitHubProjectPullRequest(
+        id: repo, number: 1, title: "XFA-3119: change", url: "https://github.com/o/\(repo)/pull/1",
+        repositoryName: repo, repositoryNameWithOwner: "o/\(repo)", authorLogin: nil, updatedAt: nil,
+        isDraft: false, state: "open", projectStatus: nil, projectPriority: nil)
+    }
+    let inventory = GitHubReviewSessionInventory(
+      provider: .codex, sessions: [orgSession, worktreeSession], pendingSessions: [],
+      resolvedPendingSessionIDs: [:], customNames: [:], statuses: [:],
+      ticketKeysBySessionID: ["org": ["XFA-3119"], "wt": ["XFA-3119"]])
+
+    #expect(
+      GitHubReviewSessionLinker.links(for: pr("xfa-web-flow"), launches: [], inventories: [inventory])
+        .map(\.session.id) == ["wt"])
+    #expect(
+      GitHubReviewSessionLinker.links(for: pr("xfa-organizations-service"), launches: [], inventories: [inventory])
+        .map(\.session.id) == ["org"])
+    #expect(!GitHubReviewSessionLinker.sessionPath("/Users/me/Github/xfa-web", belongsTo: "xfa-web-flow"))
+  }
 }

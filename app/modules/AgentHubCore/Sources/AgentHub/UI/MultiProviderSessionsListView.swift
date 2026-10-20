@@ -942,6 +942,8 @@ public struct MultiProviderSessionsListView: View {
     let isPending: Bool
     let sessionStatus: SessionStatus?
     let linkedPullRequests: [GitHubPullRequestURLReference]
+    /// Set for a session that is still starting, so it can be closed.
+    var pendingID: UUID? = nil
   }
 
   /// Identity of a sidebar row. Shared by the full build and the cheap token
@@ -1000,7 +1002,8 @@ public struct MultiProviderSessionsListView: View {
           timestamp: pending.startedAt,
           isPending: true,
           sessionStatus: nil,
-          linkedPullRequests: claudeReviewReferences[itemID] ?? []
+          linkedPullRequests: claudeReviewReferences[itemID] ?? [],
+          pendingID: pending.id
         ))
     }
 
@@ -1014,7 +1017,8 @@ public struct MultiProviderSessionsListView: View {
           timestamp: pending.startedAt,
           isPending: true,
           sessionStatus: nil,
-          linkedPullRequests: codexReviewReferences[itemID] ?? []
+          linkedPullRequests: codexReviewReferences[itemID] ?? [],
+          pendingID: pending.id
         ))
     }
 
@@ -1962,42 +1966,55 @@ public struct MultiProviderSessionsListView: View {
     isPrimaryOverride: Bool? = nil,
     onSelectOverride: (() -> Void)? = nil
   ) -> some View {
-    CollapsibleSessionRow(
-      session: item.session,
-      providerKind: item.providerKind,
-      timestamp: item.timestamp,
-      isPending: item.isPending,
-      isPrimary: isPrimaryOverride ?? (item.id == primarySessionId),
-      customName: selectedSessionCustomName(for: item),
-      sessionStatus: item.sessionStatus,
-      linkedPullRequests: item.linkedPullRequests,
-      colorScheme: colorScheme,
-      isPinned: isPinned(item),
-      onPin: item.isPending
-        ? nil
-        : {
-          withAnimation(.easeInOut(duration: 0.3)) {
-            switch item.providerKind {
-            case .claude: claudeViewModel.togglePin(for: item.session)
-            case .codex: codexViewModel.togglePin(for: item.session)
+    VStack(alignment: .leading, spacing: 0) {
+      CollapsibleSessionRow(
+        session: item.session,
+        providerKind: item.providerKind,
+        timestamp: item.timestamp,
+        isPending: item.isPending,
+        isPrimary: isPrimaryOverride ?? (item.id == primarySessionId),
+        customName: selectedSessionCustomName(for: item),
+        sessionStatus: item.sessionStatus,
+        linkedPullRequests: item.linkedPullRequests,
+        colorScheme: colorScheme,
+        isPinned: isPinned(item),
+        onPin: item.isPending
+          ? nil
+          : {
+            withAnimation(.easeInOut(duration: 0.3)) {
+              switch item.providerKind {
+              case .claude: claudeViewModel.togglePin(for: item.session)
+              case .codex: codexViewModel.togglePin(for: item.session)
+              }
+            }
+          },
+        // A session stuck while starting must stay closable: it has no transcript
+        // yet, so "archive" means cancelling the launch and its terminal.
+        onArchive: {
+          withAnimation(.easeInOut(duration: 0.25)) {
+            if item.isPending {
+              closePendingSession(item)
+            } else {
+              archiveSession(item)
             }
           }
         },
-      onArchive: item.isPending
-        ? nil
-        : {
-          withAnimation(.easeInOut(duration: 0.25)) {
-            archiveSession(item)
+        onSelect: {
+          if let onSelectOverride {
+            onSelectOverride()
+          } else {
+            selectStandaloneSession(item)
           }
-        },
-      onSelect: {
-        if let onSelectOverride {
-          onSelectOverride()
-        } else {
-          selectStandaloneSession(item)
         }
+      )
+      if !item.isPending {
+        SidebarSubagentsDisclosure(
+          session: item.session,
+          providerKind: item.providerKind,
+          refreshTrigger: item.timestamp
+        )
       }
-    )
+    }
     .padding(.vertical, 1)
   }
 
@@ -2982,6 +2999,14 @@ public struct MultiProviderSessionsListView: View {
       return
     }
     archiveSession(item)
+  }
+
+  private func closePendingSession(_ item: SelectedSessionItem) {
+    guard let pendingID = item.pendingID else { return }
+    let viewModel = sessionsViewModel(for: item.providerKind)
+    if let pending = viewModel.pendingHubSessions.first(where: { $0.id == pendingID }) {
+      viewModel.cancelPendingSession(pending)
+    }
   }
 
   /// Archives immediately (no confirmation); the undo toast is the safety net.

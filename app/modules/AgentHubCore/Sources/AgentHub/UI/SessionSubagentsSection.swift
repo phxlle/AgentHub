@@ -7,7 +7,6 @@
 //  subagent always shows up in the parent transcript), not on a timer.
 //
 
-import AppKit
 import SwiftUI
 
 struct SessionSubagentsSection: View {
@@ -16,6 +15,7 @@ struct SessionSubagentsSection: View {
   /// The parent's last activity: changes when a subagent starts or reports back.
   let refreshTrigger: Date?
   let service: (any SubagentDiscoveryServiceProtocol)?
+  let reader: any ChatTranscriptReading
 
   @State private var subagents: [SessionSubagent] = []
   @State private var isExpanded = false
@@ -28,12 +28,8 @@ struct SessionSubagentsSection: View {
         VStack(alignment: .leading, spacing: 0) {
           header
           if isExpanded {
-            VStack(spacing: 0) {
-              ForEach(subagents) { subagent in
-                SessionSubagentRow(subagent: subagent)
-              }
-            }
-            .padding(.bottom, DesignTokens.Spacing.xs)
+            SubagentListRows(subagents: subagents, providerKind: providerKind, reader: reader)
+              .padding(.bottom, DesignTokens.Spacing.xs)
             .transition(.opacity)
           }
           Divider()
@@ -91,73 +87,69 @@ struct SessionSubagentsSection: View {
   }
 }
 
-// MARK: - SessionSubagentRow
+// MARK: - SidebarSubagentsDisclosure
 
-private struct SessionSubagentRow: View {
-  let subagent: SessionSubagent
-  @State private var isHovered = false
+/// Under a sidebar session row: appears while the session has subagents running
+/// (or after you opened it), and folds out to list them. Rows open each subagent
+/// as a chat window; several can be opened side by side.
+struct SidebarSubagentsDisclosure: View {
+  let session: CLISession
+  let providerKind: SessionProviderKind
+  /// The row's last activity: a subagent starting or finishing always changes it.
+  let refreshTrigger: Date
+
+  @Environment(\.agentHub) private var agentHub
+  @State private var subagents: [SessionSubagent] = []
+  @State private var isExpanded = false
+
+  private var runningCount: Int { subagents.filter { $0.status == .running }.count }
 
   var body: some View {
-    HStack(spacing: 8) {
-      statusIcon
-        .frame(width: 14)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(subagent.name)
-          .font(.secondaryDefault)
-          .lineLimit(1)
-        if let detail {
-          Text(detail)
-            .font(.secondaryCaption)
+    Group {
+      if runningCount > 0 || (isExpanded && !subagents.isEmpty) {
+        VStack(alignment: .leading, spacing: 0) {
+          Button {
+            withAnimation(.easeOut(duration: 0.18)) { isExpanded.toggle() }
+          } label: {
+            HStack(spacing: 5) {
+              Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .bold))
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+              Image(systemName: "arrow.turn.down.right")
+                .font(.system(size: 9))
+              Text(label)
+                .font(.secondaryCaption)
+              Spacer()
+            }
             .foregroundStyle(.secondary)
-            .lineLimit(1)
+            .padding(.leading, 26)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .help(isExpanded ? "Hide subagents" : "Show this session's subagents")
+          if isExpanded, let reader = agentHub?.chatTranscriptReader {
+            SubagentListRows(
+              subagents: subagents, providerKind: providerKind, reader: reader, indent: 22,
+              compact: true)
+          }
         }
-      }
-      Spacer(minLength: 6)
-      if isHovered {
-        Button {
-          NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: subagent.transcriptPath)])
-        } label: {
-          Image(systemName: "doc.text.magnifyingglass").font(.system(size: 10))
-        }
-        .buttonStyle(.borderless)
-        .help("Show transcript in Finder")
+        .transition(.opacity)
       }
     }
-    .padding(.horizontal, DesignTokens.Spacing.md)
-    .padding(.vertical, 4)
-    .background(isHovered ? Color.primary.opacity(0.04) : .clear)
-    .onHover { isHovered = $0 }
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(subagent.name), \(subagent.status == .running ? "running" : "done")")
-  }
-
-  @ViewBuilder
-  private var statusIcon: some View {
-    switch subagent.status {
-    case .running:
-      ProgressView().controlSize(.mini)
-    case .done:
-      Image(systemName: "checkmark.circle.fill")
-        .font(.system(size: 11))
-        .foregroundStyle(.green)
+    .task(id: refreshTrigger) {
+      guard let service = agentHub?.subagentDiscoveryService else { return }
+      try? await Task.sleep(for: .milliseconds(300))
+      guard !Task.isCancelled else { return }
+      let found = await service.subagents(for: session, provider: providerKind)
+      if found != subagents {
+        withAnimation(.easeOut(duration: 0.15)) { subagents = found }
+      }
     }
   }
 
-  private var detail: String? {
-    var parts: [String] = []
-    if let kind = subagent.kind { parts.append(kind) }
-    parts.append(subagent.status == .running ? "running" : "done")
-    if let start = subagent.startedAt {
-      let end = subagent.status == .running ? Date.now : (subagent.lastActivityAt ?? start)
-      parts.append(Self.duration(end.timeIntervalSince(start)))
-    }
-    return parts.joined(separator: " · ")
-  }
-
-  static func duration(_ seconds: TimeInterval) -> String {
-    let total = max(0, Int(seconds))
-    if total < 60 { return "\(total)s" }
-    if total < 3600 { return "\(total / 60)m \(total % 60)s" }
-    return "\(total / 3600)h \(total % 3600 / 60)m"
+  private var label: String {
+    let total = subagents.count == 1 ? "1 subagent" : "\(subagents.count) subagents"
+    return runningCount > 0 ? "\(total) · \(runningCount) running" : total
   }
 }

@@ -157,8 +157,12 @@ enum GitHubReviewSessionLinker {
 
       let pullRequestKeys = ticketKeys(inTitle: pullRequest.title)
       if !pullRequestKeys.isEmpty {
+        // Same ticket is not enough: one ticket often spans several repositories,
+        // and a session on the Organization Service must not claim the Web Flow PR.
         for session in inventory.sessions
-        where !Set(inventory.ticketKeysBySessionID[session.id] ?? []).isDisjoint(with: pullRequestKeys) {
+        where !Set(inventory.ticketKeysBySessionID[session.id] ?? []).isDisjoint(with: pullRequestKeys)
+          && sessionPath(session.projectPath, belongsTo: pullRequest.repositoryName)
+        {
           insert(link(for: session, inventory: inventory), into: &candidates)
         }
       }
@@ -216,6 +220,16 @@ enum GitHubReviewSessionLinker {
       displayName: inventory.customNames[session.id] ?? session.displayName,
       status: inventory.statuses[session.id]
     )
+  }
+
+  /// Whether a session's working directory is inside the PR's repository: a path
+  /// component named like the repository, or a worktree named `<repo>-…`.
+  static func sessionPath(_ path: String, belongsTo repositoryName: String) -> Bool {
+    let name = repositoryName.lowercased()
+    guard !name.isEmpty else { return false }
+    return path.lowercased().split(separator: "/").contains { component in
+      component == name || component.hasPrefix(name + "-")
+    }
   }
 
   static func ticketKeys(inTitle title: String) -> Set<String> {

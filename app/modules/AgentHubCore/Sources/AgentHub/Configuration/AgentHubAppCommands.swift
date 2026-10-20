@@ -23,6 +23,14 @@ public enum AgentHubAppCommand {
   public static let archiveCurrentSessionNotification = Notification.Name(
     "com.agenthub.command.archive-current-session"
   )
+  public static let resumeSessionByIDNotification = Notification.Name(
+    "com.agenthub.command.resume-session-by-id"
+  )
+
+  @MainActor
+  public static func resumeSessionByID() {
+    NotificationCenter.default.post(name: resumeSessionByIDNotification, object: nil)
+  }
 
   @MainActor
   public static func selectWorkspace(_ section: AgentHubWorkspaceSection) {

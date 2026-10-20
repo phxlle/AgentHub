@@ -3290,6 +3290,27 @@ public final class CLISessionsViewModel {
   }
 
   /// Adds a repository at the given path
+  /// The session id in pasted text: a bare id or a command like
+  /// `claude --resume <id>` / `codex resume <id>`.
+  public nonisolated static func extractSessionID(from text: String) -> String? {
+    let pattern = #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
+    return text.range(of: pattern, options: .regularExpression).map { String(text[$0]).lowercased() }
+  }
+
+  /// Finds a session of this provider by id on disk, adds its folder when needed,
+  /// and starts monitoring it. Nil when this provider has no session with that id.
+  public func resumeSession(id: String) async -> CLISession? {
+    guard let session = await monitorService.loadSessions(ids: [id]).first else { return nil }
+    if !selectedRepositories.contains(where: {
+      WorktreeModuleResolver.normalizedDirectoryPath($0.path)
+        == WorktreeModuleResolver.normalizedDirectoryPath(session.projectPath)
+    }) {
+      addRepository(at: session.projectPath)
+    }
+    startMonitoring(session: session)
+    return session
+  }
+
   public func addRepository(at path: String) {
     let repoName = URL(fileURLWithPath: path).lastPathComponent
     // [CLISessionsVM] addRepository called for: \(path) (name: \(repoName))")

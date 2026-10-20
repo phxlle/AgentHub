@@ -444,7 +444,11 @@ public struct MultiProviderMonitoringPanelView: View {
     }
     .onChange(of: primarySessionId) { _, newId in
       guard let newId else { return }
-      if let item = makeItemSnapshot().allItems.first(where: { $0.id == newId }) {
+      // Only in Terminal view: in Chat the terminal runs hidden underneath, and
+      // focusing it would send your typing there instead of to the chat.
+      if let item = makeItemSnapshot().allItems.first(where: { $0.id == newId }),
+        editorState(for: item).contentMode == .terminal
+      {
         item.viewModel.focusTerminal(forKey: item.sessionId)
       }
       ensureLiveMonitoringForPrimaryItem()

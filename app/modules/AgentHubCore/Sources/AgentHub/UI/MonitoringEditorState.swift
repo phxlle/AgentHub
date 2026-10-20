@@ -27,6 +27,8 @@ public enum DiffDisplayMode: String, CaseIterable, Identifiable, Sendable {
 
 public enum MonitoringCardContentMode: String, CaseIterable, Identifiable {
   case terminal
+  /// Chat layer over the transcript: your messages right, the agent left.
+  case chat
   case editor
   case diffs
 
@@ -35,6 +37,7 @@ public enum MonitoringCardContentMode: String, CaseIterable, Identifiable {
   var label: String {
     switch self {
     case .terminal: "Terminal"
+    case .chat: "Chat"
     case .editor: "Files"
     case .diffs: "Diffs"
     }
@@ -43,6 +46,7 @@ public enum MonitoringCardContentMode: String, CaseIterable, Identifiable {
   var systemImage: String {
     switch self {
     case .terminal: "terminal"
+    case .chat: "bubble.left.and.bubble.right"
     case .editor: "doc.text"
     case .diffs: "arrow.left.arrow.right"
     }
@@ -66,7 +70,8 @@ public struct FileExplorerNavigationRequest: Equatable {
 }
 
 struct MonitoringEditorState: Equatable {
-  var contentMode: MonitoringCardContentMode = .terminal
+  /// Chat is the default view; the terminal keeps running underneath it.
+  var contentMode: MonitoringCardContentMode = .chat
   var projectPath: String
   var selectedFilePath: String?
   var navigationRequest: FileExplorerNavigationRequest?
@@ -82,7 +87,7 @@ enum MonitoringEditorStateStore {
     diffDisplayMode: DiffDisplayMode,
     diffAvailabilityStatus: DiffAvailabilityStatus?
   ) -> [MonitoringCardContentMode] {
-    var modes: [MonitoringCardContentMode] = [.terminal, .editor]
+    var modes: [MonitoringCardContentMode] = [.terminal, .chat, .editor]
     if diffDisplayMode == .inline,
        diffAvailabilityStatus?.canShowDiffViewer == true {
       modes.append(.diffs)

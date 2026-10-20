@@ -418,6 +418,9 @@ public final class AgentHubProvider {
     sessionStore: metadataStore
   )
 
+  /// Reads session transcripts into chat items, incrementally per file.
+  public private(set) lazy var chatTranscriptReader: any ChatTranscriptReading = ChatTranscriptReader()
+
   /// Subagents a session started (Claude Task agents, Codex spawn_agent threads).
   public private(set) lazy var subagentDiscoveryService: any SubagentDiscoveryServiceProtocol =
     SubagentDiscoveryService(codexDataPath: configuration.codexDataPath)

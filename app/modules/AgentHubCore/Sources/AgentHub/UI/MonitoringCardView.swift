@@ -330,7 +330,8 @@ public struct MonitoringCardView: View {
         session: session,
         providerKind: providerKind,
         refreshTrigger: state?.lastActivityAt,
-        service: hubProvider?.subagentDiscoveryService
+        service: hubProvider?.subagentDiscoveryService,
+        reader: hubProvider?.chatTranscriptReader ?? ChatTranscriptReader()
       )
 
       monitorContent
@@ -1088,11 +1089,60 @@ public struct MonitoringCardView: View {
     switch effectiveContentMode {
     case .terminal:
       terminalContent
+    case .chat:
+      // The terminal stays mounted (invisible) under the chat: a new session only
+      // starts once its terminal exists, and the composer types into it.
+      ZStack {
+        terminalContent
+          .opacity(0)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        chatContent
+      }
     case .editor:
       editorContent
     case .diffs:
       diffContent
     }
+  }
+
+  private var chatContent: some View {
+    ChatTranscriptView(
+      transcriptPath: session.sessionFilePath,
+      providerKind: providerKind,
+      reader: hubProvider?.chatTranscriptReader ?? ChatTranscriptReader(),
+      onSend: { text in
+        guard let viewModel else { return false }
+        // Straight to this card's terminal first (also covers a session still
+        // starting, whose id is only a placeholder that must not be monitored).
+        if viewModel.sendPromptToActiveTerminal(forKey: terminalKey ?? session.id, prompt: text) {
+          AppLogger.chat.notice("Chat sent to terminal \(terminalKey ?? session.id, privacy: .public)")
+          return true
+        }
+        AppLogger.chat.notice("Chat terminal not ready for \(terminalKey ?? session.id, privacy: .public)")
+        guard !session.id.hasPrefix("pending-") else { return false }
+        return viewModel.sendAutomatedPrompt(to: session, prompt: text)
+      },
+      terminalNotice: chatTerminalNotice,
+      onShowTerminal: { contentMode = .terminal },
+      pendingApproval: state?.pendingToolUse.map { ($0.toolName, $0.input.map(ChatTranscriptReader.firstLine)) },
+      onApprove: {
+        // The permission menu selects option 1 ("Yes") on its digit key.
+        viewModel?.typeTextInActiveTerminal(forKey: terminalKey ?? session.id, text: "1") ?? false
+      }
+    )
+    .background(Color(nsColor: .windowBackgroundColor))
+  }
+
+  /// Things the chat can't show: approvals and a launch that hasn't written yet.
+  private var chatTerminalNotice: String? {
+    if case .awaitingApproval = state?.status {
+      return "The agent is waiting for your approval in the terminal."
+    }
+    if session.sessionFilePath == nil {
+      return "The session is starting. Its first steps show in the terminal."
+    }
+    return nil
   }
 
   private var terminalContent: some View {
@@ -1120,7 +1170,7 @@ public struct MonitoringCardView: View {
     FileExplorerView(
       session: session,
       projectPath: editorProjectPath,
-      onDismiss: { contentMode = .terminal },
+      onDismiss: { contentMode = .chat },
       isEmbedded: false,
       selectedFilePath: $selectedEditorFilePath,
       navigationRequest: editorNavigationRequest
@@ -1133,7 +1183,7 @@ public struct MonitoringCardView: View {
     GitDiffView(
       session: session,
       projectPath: session.projectPath,
-      onDismiss: { contentMode = .terminal },
+      onDismiss: { contentMode = .chat },
       cliConfiguration: liveCLIConfiguration,
       providerKind: providerKind,
       onInlineRequestSubmit: { prompt, sess in

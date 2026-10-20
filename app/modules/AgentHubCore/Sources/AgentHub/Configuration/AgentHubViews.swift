@@ -30,6 +30,7 @@ public struct AgentHubOperationsView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.runtimeTheme) private var runtimeTheme
   @State private var section = AgentHubWorkspaceSection.workflows
+  @State private var isResumingByID = false
 
   public init() {}
 
@@ -195,6 +196,19 @@ public struct AgentHubOperationsView: View {
       await agentHub.gitHubReviewsViewModel.loadSessionAssociations()
     }
     .onReceive(
+      NotificationCenter.default.publisher(for: AgentHubAppCommand.resumeSessionByIDNotification)
+    ) { _ in
+      isResumingByID = true
+    }
+    .sheet(isPresented: $isResumingByID) {
+      if let agentHub {
+        ResumeSessionByIDSheet(
+          onResume: { id in await resumeSession(id: id, agentHub: agentHub) },
+          onDismiss: { isResumingByID = false }
+        )
+      }
+    }
+    .onReceive(
       NotificationCenter.default.publisher(for: AgentHubAppCommand.selectWorkspaceNotification)
     ) { notification in
       guard let requestedSection = AgentHubAppCommand.workspaceSection(from: notification) else {
@@ -325,6 +339,23 @@ public struct AgentHubOperationsView: View {
       provider: provider
     )
     applyReviewSessionTitles(provider: provider, agentHub: agentHub)
+  }
+
+  /// Looks the id up in Claude and Codex at once and opens whichever has it.
+  private func resumeSession(id: String, agentHub: AgentHubProvider) async -> Bool {
+    async let claude = agentHub.claudeSessionsViewModel.resumeSession(id: id)
+    async let codex = agentHub.codexSessionsViewModel.resumeSession(id: id)
+    let (claudeSession, codexSession) = await (claude, codex)
+    guard let session = claudeSession ?? codexSession else { return false }
+    let provider: SessionProviderKind = claudeSession != nil ? .claude : .codex
+    agentHub.globalSessionSelectionRouter.select(
+      providerKind: provider,
+      sessionId: session.id,
+      projectPath: session.projectPath,
+      session: session
+    )
+    section = .sessions
+    return true
   }
 
   private func startJiraTicket(
@@ -578,5 +609,70 @@ private struct WorkspaceSwitcherBar: View {
         section: .sprint, systemImage: "rectangle.split.3x1", shortcut: "4",
         count: agentHub?.jiraSprintViewModel.myOpenTicketCount),
     ]
+  }
+}
+
+// MARK: - ResumeSessionByIDSheet
+
+/// Paste a session id (or a `claude --resume …` / `codex resume …` command).
+private struct ResumeSessionByIDSheet: View {
+  let onResume: (String) async -> Bool
+  let onDismiss: () -> Void
+
+  @State private var text = ""
+  @State private var isSearching = false
+  @State private var notFound = false
+  @FocusState private var isFocused: Bool
+
+  private var sessionID: String? { CLISessionsViewModel.extractSessionID(from: text) }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+      VStack(alignment: .leading, spacing: 3) {
+        Text("Resume a session")
+          .font(.geist(size: 15, weight: .semibold))
+        Text("Paste a Claude or Codex session ID. A full resume command works too.")
+          .font(.secondarySmall)
+          .foregroundStyle(.secondary)
+      }
+      TextField("Session ID", text: $text)
+        .textFieldStyle(.roundedBorder)
+        .font(.jetBrainsMono(size: 12))
+        .focused($isFocused)
+        .onSubmit(resume)
+        .onChange(of: text) { _, _ in notFound = false }
+      if notFound {
+        Label("No Claude or Codex session found with this ID.", systemImage: "questionmark.circle")
+          .font(.secondarySmall)
+          .foregroundStyle(.orange)
+      } else if !text.isEmpty, sessionID == nil {
+        Text("That doesn't look like a session ID.")
+          .font(.secondarySmall)
+          .foregroundStyle(.secondary)
+      }
+      HStack {
+        Spacer()
+        Button("Cancel", role: .cancel, action: onDismiss)
+          .keyboardShortcut(.cancelAction)
+        Button(action: resume) {
+          if isSearching { ProgressView().controlSize(.small) } else { Text("Resume") }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(sessionID == nil || isSearching)
+      }
+    }
+    .padding(DesignTokens.Spacing.lg)
+    .frame(width: 460)
+    .onAppear { isFocused = true }
+  }
+
+  private func resume() {
+    guard let sessionID, !isSearching else { return }
+    isSearching = true
+    Task {
+      let found = await onResume(sessionID)
+      isSearching = false
+      if found { onDismiss() } else { notFound = true }
+    }
   }
 }

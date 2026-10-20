@@ -42,6 +42,13 @@ public enum AppLogger {
   /// UI-related logging
   public static let ui = Logger(subsystem: subsystem, category: "UI")
 
+  /// Chat view: opens, transcript reloads, sends. Read with
+  /// `log show --predicate 'subsystem == "com.agenthub" AND category == "Chat"'`.
+  public static let chat = Logger(subsystem: subsystem, category: "Chat")
+
+  /// Main-thread stalls and other responsiveness problems.
+  public static let performance = Logger(subsystem: subsystem, category: "Performance")
+
   /// Dev server lifecycle and output
   public static let devServer = Logger(subsystem: subsystem, category: "DevServer")
 

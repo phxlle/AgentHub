@@ -6,7 +6,7 @@ import Testing
 
 @Suite("MonitoringEditorState")
 struct MonitoringEditorStateTests {
-  @Test("Missing editor state defaults to terminal mode and the item project path")
+  @Test("Missing editor state defaults to chat mode and the item project path")
   func defaultStateUsesItemProjectPath() {
     let state = MonitoringEditorStateStore.state(
       for: "claude-session-1",
@@ -14,7 +14,7 @@ struct MonitoringEditorStateTests {
       in: [:]
     )
 
-    #expect(state.contentMode == .terminal)
+    #expect(state.contentMode == .chat)
     #expect(state.projectPath == "/tmp/repo")
     #expect(state.selectedFilePath == nil)
     #expect(state.navigationRequest == nil)
@@ -165,9 +165,9 @@ struct MonitoringEditorStateTests {
       diffAvailabilityStatus: .available
     )
 
-    #expect(availableItems.map(\.value) == [.terminal, .editor, .diffs])
-    #expect(checkingItems.map(\.value) == [.terminal, .editor, .diffs])
-    #expect(unavailableItems.map(\.value) == [.terminal, .editor])
-    #expect(sidePanelItems.map(\.value) == [.terminal, .editor])
+    #expect(availableItems.map(\.value) == [.terminal, .chat, .editor, .diffs])
+    #expect(checkingItems.map(\.value) == [.terminal, .chat, .editor, .diffs])
+    #expect(unavailableItems.map(\.value) == [.terminal, .chat, .editor])
+    #expect(sidePanelItems.map(\.value) == [.terminal, .chat, .editor])
   }
 }

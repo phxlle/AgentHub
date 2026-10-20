@@ -110,6 +110,36 @@ struct AgentWorkspaceSessionCoordinatorTests {
     #expect(store.getWorkspaceStateSync(for: .claude).monitoredSessionIds == [session.id])
   }
 
+  @Test("Resume by id finds the session on disk, adds its folder, and monitors it")
+  func resumeSessionByID() async throws {
+    let store = try SessionMetadataStore(path: temporaryCoordinatorDatabasePath())
+    let session = workspaceSession(provider: .codex)
+    let viewModel = makeCoordinatorViewModel(
+      provider: .codex,
+      monitor: WorkspaceCoordinatorMonitorSpy(sessionsByID: [session.id: session]),
+      watcher: WorkspaceCoordinatorWatcherSpy(),
+      store: store
+    )
+    await waitForCoordinatorCondition { viewModel.hasReadPersistedWorkspaceState }
+
+    #expect(await viewModel.resumeSession(id: "unknown-id") == nil)
+    let resumed = await viewModel.resumeSession(id: session.id)
+
+    #expect(resumed?.id == session.id)
+    #expect(viewModel.isMonitoring(sessionId: session.id))
+    await waitForCoordinatorCondition {
+      viewModel.selectedRepositories.map(\.path).contains(session.projectPath)
+    }
+  }
+
+  @Test("Session ids are found in pasted resume commands")
+  func extractSessionID() {
+    let id = "01A13EDE-F36E-7801-8CF4-8E3165D805A1"
+    #expect(CLISessionsViewModel.extractSessionID(from: "codex resume \(id)") == id.lowercased())
+    #expect(CLISessionsViewModel.extractSessionID(from: "  claude --resume \(id.lowercased())\n") == id.lowercased())
+    #expect(CLISessionsViewModel.extractSessionID(from: "not an id") == nil)
+  }
+
   @Test("Undoing an archive resumes monitoring and restores the pin")
   func undoArchiveRestoresMonitoringAndPin() async throws {
     let store = try SessionMetadataStore(path: temporaryCoordinatorDatabasePath())

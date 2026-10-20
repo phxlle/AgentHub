@@ -174,8 +174,9 @@ struct CollapsibleSessionRow: View {
 
           Spacer(minLength: 4)
 
-          if let onArchive, !isPending {
-            SessionRowArchiveButton(isVisible: isRowHovered, action: onArchive)
+          if let onArchive {
+            SessionRowArchiveButton(
+              isVisible: isRowHovered, isPending: isPending, action: onArchive)
           }
         }
 
@@ -576,13 +577,14 @@ private func sectionHeader(_ title: String) -> some View {
 /// transparent) when hidden so the title doesn't shift as the pointer moves.
 private struct SessionRowArchiveButton: View {
   let isVisible: Bool
+  var isPending = false
   let action: () -> Void
 
   @State private var isHovered = false
 
   var body: some View {
     Button(action: action) {
-      Image(systemName: "archivebox")
+      Image(systemName: isPending ? "xmark.circle" : "archivebox")
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(isHovered ? .primary : .secondary)
         .frame(width: 20, height: 18)
@@ -596,7 +598,7 @@ private struct SessionRowArchiveButton: View {
     .opacity(isVisible ? 1 : 0)
     .allowsHitTesting(isVisible)
     .onHover { isHovered = $0 }
-    .help("Archive session")
-    .accessibilityLabel("Archive session")
+    .help(isPending ? "Stop this starting session" : "Archive session")
+    .accessibilityLabel(isPending ? "Stop starting session" : "Archive session")
   }
 }

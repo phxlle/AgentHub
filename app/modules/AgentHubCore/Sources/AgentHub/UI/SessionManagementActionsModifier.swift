@@ -17,6 +17,10 @@ struct SessionManagementActionsModifier: ViewModifier {
   func body(content: Content) -> some View {
     content
       .contextMenu {
+        if isPending, let onArchive {
+          // A launch that never resolved still needs a way out.
+          Button("Stop Starting Session", systemImage: "xmark.circle") { onArchive() }
+        }
         if !isPending {
           if let onPin {
             Button(
