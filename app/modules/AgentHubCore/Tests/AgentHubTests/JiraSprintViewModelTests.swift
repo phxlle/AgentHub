@@ -150,6 +150,62 @@ struct JiraSprintViewModelTests {
     #expect(viewModel.statusNotice?.text.contains("not allowed") == true)
   }
 
+  @Test("Reaching Done fires the cleanup hook: drag, Sync, and a move made in Jira itself")
+  func doneFiresCleanupHook() async {
+    let service = MockJiraSprintService(tickets: Self.sprintTickets)
+    let search = PullRequestSearchStub()
+    await search.setTicketPullRequests([
+      "XFA-1": [.init(pullRequest: PullRequestSearchStub.pullRequest("XFA-1", state: "merged"), isApproved: true)]
+    ])
+    let viewModel = JiraSprintViewModel(
+      service: service, pullRequestSearch: search, userDefaults: Self.makeDefaults())
+    viewModel.assigneeFilter = .everyone
+    var doneKeys: [String] = []
+    viewModel.onTicketDone = { doneKeys.append($0) }
+
+    // First load: XFA-3 is already Done and must not be cleaned up again.
+    await viewModel.load()
+    #expect(doneKeys.isEmpty)
+
+    await viewModel.moveTicket("XFA-5", toStatus: "Done", category: "done")
+    await viewModel.moveTicket("XFA-2", toStatus: "To Do", category: "new")
+    #expect(doneKeys == ["XFA-5"])
+
+    await service.failTransitions(JiraTicketReaderError.commandFailed(exitCode: 1, message: "no"))
+    await viewModel.moveTicket("XFA-4", toStatus: "Done", category: "done")
+    #expect(doneKeys == ["XFA-5"])
+    await service.failTransitions(nil)
+
+    await viewModel.planSync(openSessionKeys: ["XFA-4"])
+    await viewModel.applySync()
+    #expect(doneKeys == ["XFA-5", "XFA-1"])
+
+    // Someone moved XFA-2 to Done in Jira; the next reload notices.
+    await service.setTickets(
+      Self.sprintTickets.map { $0.key == "XFA-2" ? $0.withStatus("Done", category: "done") : $0 })
+    await viewModel.load()
+    #expect(doneKeys == ["XFA-5", "XFA-1", "XFA-2"])
+    await viewModel.load()
+    #expect(doneKeys == ["XFA-5", "XFA-1", "XFA-2"])
+  }
+
+  @Test("Cleanup report names what was removed and flags failures")
+  func cleanupReport() {
+    let viewModel = JiraSprintViewModel(service: MockJiraSprintService(), userDefaults: Self.makeDefaults())
+
+    viewModel.reportCleanup(ticketKey: "XFA-5", removedWorktrees: 1, archivedSessions: 2, failures: [])
+    #expect(viewModel.statusNotice == .init(
+      ticketKey: "XFA-5", text: "XFA-5 done: removed 1 worktree, archived 2 sessions", isError: false))
+
+    viewModel.reportCleanup(ticketKey: "XFA-5", removedWorktrees: 0, archivedSessions: 0, failures: ["xfa-5: dirty"])
+    #expect(viewModel.statusNotice?.isError == true)
+    #expect(viewModel.statusNotice?.text == "XFA-5 done: nothing cleaned up. xfa-5: dirty")
+
+    viewModel.dismissStatusNotice()
+    viewModel.reportCleanup(ticketKey: "XFA-5", removedWorktrees: 0, archivedSessions: 0, failures: [])
+    #expect(viewModel.statusNotice == nil)
+  }
+
   @Test("Opening a ticket searches its pull requests once, scoped to the owner")
   func ticketPullRequests() async {
     let search = PullRequestSearchStub()
@@ -311,14 +367,15 @@ private actor MockJiraSprintService: JiraTicketReading, JiraTicketSearching, Jir
   private(set) var transitions: [String] = []
   var transitionError: Error?
 
-  func failTransitions(_ error: Error) { transitionError = error }
+  func failTransitions(_ error: Error?) { transitionError = error }
 
   func transition(key: String, toStatus status: String) async throws {
     transitions.append("\(key)->\(status)")
     if let transitionError { throw transitionError }
   }
 
-  private let tickets: [JiraTicketSnapshot]
+  private var tickets: [JiraTicketSnapshot]
+  func setTickets(_ value: [JiraTicketSnapshot]) { tickets = value }
   private let error: Error?
   private let detailed: JiraTicketSnapshot?
   private(set) var searchedJQL: [String] = []

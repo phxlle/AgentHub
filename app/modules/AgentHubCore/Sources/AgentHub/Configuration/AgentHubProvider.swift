@@ -426,13 +426,19 @@ public final class AgentHubProvider {
     SubagentDiscoveryService(codexDataPath: configuration.codexDataPath)
 
   /// Open-sprint Jira tickets that can be handed to Claude or Codex.
-  public private(set) lazy var jiraSprintViewModel = JiraSprintViewModel(
-    pullRequestSearch: gitHubProjectReviewService,
-    gitHubOwner: { [weak self] repositoryPath in
-      self?.gitHubReviewsViewModel.selectedProject?.ownerLogin
-        ?? repositoryPath.flatMap(GitHubRemoteOwner.owner(ofRepositoryAt:))
+  public private(set) lazy var jiraSprintViewModel: JiraSprintViewModel = {
+    let viewModel = JiraSprintViewModel(
+      pullRequestSearch: gitHubProjectReviewService,
+      gitHubOwner: { [weak self] repositoryPath in
+        self?.gitHubReviewsViewModel.selectedProject?.ownerLogin
+          ?? repositoryPath.flatMap(GitHubRemoteOwner.owner(ofRepositoryAt:))
+      }
+    )
+    viewModel.onTicketDone = { [weak self] key in
+      await self?.cleanUpLocalWork(forDoneTicket: key)
     }
-  )
+    return viewModel
+  }()
 
   /// Bridges provider-neutral workspaces to Claude and Codex monitoring.
   public private(set) lazy var agentWorkspaceSessionCoordinator:

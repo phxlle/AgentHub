@@ -47,7 +47,15 @@ struct JiraSprintView: View {
         .inspectorColumnWidth(min: 340, ideal: 420, max: 560)
     }
     .task {
-      if viewModel.state == .idle { await viewModel.load() }
+      // Reload on every visit and every two minutes while visible, so a ticket
+      // moved to Done in Jira itself is noticed (and its local work cleaned up).
+      // ponytail: polls only while the Sprint tab is open; a background poll if that's too late.
+      await viewModel.load()
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(120))
+        guard !Task.isCancelled else { return }
+        await viewModel.load()
+      }
     }
   }
 

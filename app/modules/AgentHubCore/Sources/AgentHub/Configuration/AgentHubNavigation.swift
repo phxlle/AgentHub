@@ -46,4 +46,45 @@ extension AgentHubProvider {
       knownProjectKeys: jiraSprintViewModel.knownProjectKeys
     )
   }
+
+  /// A ticket reached Done, so its local work is finished: delete the worktrees
+  /// named after it and stop monitoring the sessions that worked on it. Git
+  /// refuses to remove a worktree with uncommitted changes; that failure is
+  /// reported on the board instead of forced.
+  func cleanUpLocalWork(forDoneTicket key: String) async {
+    let plan = JiraTicketCleanup.plan(
+      ticketKey: key,
+      linkedSessions: jiraLinkedSessions()[key.uppercased()] ?? [],
+      repositories: [
+        .claude: claudeSessionsViewModel.selectedRepositories,
+        .codex: codexSessionsViewModel.selectedRepositories,
+      ]
+    )
+    guard !plan.isEmpty else { return }
+    let viewModels: [SessionProviderKind: CLISessionsViewModel] = [
+      .claude: claudeSessionsViewModel, .codex: codexSessionsViewModel,
+    ]
+    var removed = 0
+    var failures: [String] = []
+    for item in plan.worktrees {
+      guard let viewModel = viewModels[item.provider] else { continue }
+      if await viewModel.deleteWorktree(item.worktree) {
+        removed += 1
+        for other in viewModels.values {
+          other.archiveMonitoredSessions(inWorktreePath: item.worktree.path)
+          other.forgetOwnedWorktreePath(item.worktree.path)
+        }
+      } else {
+        failures.append(
+          "\(item.worktree.name): "
+            + (viewModel.worktreeDeletionError?.message ?? "worktree could not be deleted"))
+        viewModel.clearWorktreeDeletionError()
+      }
+    }
+    for item in plan.sessions {
+      viewModels[item.provider]?.stopMonitoring(sessionId: item.sessionID)
+    }
+    jiraSprintViewModel.reportCleanup(
+      ticketKey: key, removedWorktrees: removed, archivedSessions: plan.sessions.count, failures: failures)
+  }
 }

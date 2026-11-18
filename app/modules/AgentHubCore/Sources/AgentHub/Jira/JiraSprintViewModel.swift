@@ -158,6 +158,9 @@ public final class JiraSprintViewModel {
   @ObservationIgnored private let userDefaults: UserDefaults
   @ObservationIgnored private var detailTask: Task<Void, Never>?
   @ObservationIgnored let sessionLinker = JiraSessionLinker()
+  /// Called once per ticket that reaches Done: dragged there on the board, moved
+  /// by Sync, or found Done on a reload after someone moved it in Jira.
+  @ObservationIgnored public var onTicketDone: (@MainActor (String) async -> Void)?
 
   public init(
     service: any JiraSprintService = ACLITicketReader(),
@@ -360,12 +363,19 @@ public final class JiraSprintViewModel {
       loadedStatuses = []
       return
     }
+    let previousCategories = Dictionary(
+      sprintTickets.map { ($0.key, $0.statusCategory) }, uniquingKeysWith: { first, _ in first })
     sprintTickets = try await service.searchTickets(jql: "sprint = \(sprintID) ORDER BY rank", limit: 300)
+    // Tickets we knew as not-done that come back done were moved in Jira itself.
+    let newlyDone = sprintTickets.filter {
+      $0.statusCategory == "done" && previousCategories[$0.key] != nil && previousCategories[$0.key] != "done"
+    }
     var statuses: [(name: String, category: String?)] = []
     for ticket in sprintTickets where !statuses.contains(where: { $0.name == (ticket.status ?? "No status") }) {
       statuses.append((ticket.status ?? "No status", ticket.statusCategory))
     }
     loadedStatuses = statuses
+    for ticket in newlyDone { await onTicketDone?(ticket.key) }
   }
 
   /// Runs the Atlassian CLI browser login, then reloads.
@@ -467,6 +477,7 @@ public final class JiraSprintViewModel {
     do {
       try await service.transition(key: key, toStatus: status)
       statusNotice = StatusNotice(ticketKey: key, text: "\(key) moved to \(status)", isError: false)
+      if category == "done" { await onTicketDone?(key) }
     } catch {
       applyStatus(original.status ?? "", category: original.statusCategory, to: key)
       if originalDetail?.key == key { ticketDetail = originalDetail }
@@ -549,10 +560,12 @@ public final class JiraSprintViewModel {
     isApplyingSync = true
     defer { isApplyingSync = false }
     var failures: [String] = []
+    var doneKeys: [String] = []
     for change in plan {
       do {
         try await service.transition(key: change.key, toStatus: change.toStatus)
         applyStatus(change.toStatus, category: change.toCategory, to: change.key)
+        if change.toCategory == "done" { doneKeys.append(change.key) }
       } catch {
         failures.append("\(change.key): \(Self.message(for: error))")
       }
@@ -565,6 +578,18 @@ public final class JiraSprintViewModel {
         ticketKey: "",
         text: "Synced \(plan.count - failures.count) of \(plan.count). " + failures.joined(separator: "; "),
         isError: true)
+    for key in doneKeys { await onTicketDone?(key) }
+  }
+
+  /// Shows what the Done cleanup did for a ticket (worktrees removed, sessions archived).
+  public func reportCleanup(ticketKey: String, removedWorktrees: Int, archivedSessions: Int, failures: [String]) {
+    var parts: [String] = []
+    if removedWorktrees > 0 { parts.append("removed \(removedWorktrees) worktree\(removedWorktrees == 1 ? "" : "s")") }
+    if archivedSessions > 0 { parts.append("archived \(archivedSessions) session\(archivedSessions == 1 ? "" : "s")") }
+    guard !parts.isEmpty || !failures.isEmpty else { return }
+    var text = "\(ticketKey) done: " + (parts.isEmpty ? "nothing cleaned up" : parts.joined(separator: ", "))
+    if !failures.isEmpty { text += ". " + failures.joined(separator: "; ") }
+    statusNotice = StatusNotice(ticketKey: ticketKey, text: text, isError: !failures.isEmpty)
   }
 
   public func cancelSync() {
