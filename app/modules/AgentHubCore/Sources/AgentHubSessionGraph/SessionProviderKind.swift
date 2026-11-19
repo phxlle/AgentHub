@@ -10,4 +10,5 @@ import Foundation
 public enum SessionProviderKind: String, CaseIterable, Codable, Sendable {
   case claude = "Claude"
   case codex = "Codex"
+  case antigravity = "Antigravity"
 }

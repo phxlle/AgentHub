@@ -51,17 +51,20 @@ public struct WorktreeBranchNamingResult: Sendable, Equatable {
   public let single: String?
   public let claude: String?
   public let codex: String?
+  public let antigravity: String?
   public let source: WorktreeBranchNameSource
 
   public init(
     single: String? = nil,
     claude: String? = nil,
     codex: String? = nil,
+    antigravity: String? = nil,
     source: WorktreeBranchNameSource
   ) {
     self.single = single
     self.claude = claude
     self.codex = codex
+    self.antigravity = antigravity
     self.source = source
   }
 }

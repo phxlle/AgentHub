@@ -9,13 +9,16 @@ import Foundation
 public final class AgentWorkspaceSessionCoordinator: AgentWorkspaceSessionCoordinating {
   private let claudeViewModel: CLISessionsViewModel
   private let codexViewModel: CLISessionsViewModel
+  private let antigravityViewModel: CLISessionsViewModel?
 
   public init(
     claudeViewModel: CLISessionsViewModel,
-    codexViewModel: CLISessionsViewModel
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
   }
 
   public func cliConfiguration(for provider: SessionProviderKind) -> CLICommandConfiguration {
@@ -54,7 +57,11 @@ public final class AgentWorkspaceSessionCoordinator: AgentWorkspaceSessionCoordi
   }
 
   private func viewModel(for provider: SessionProviderKind) -> CLISessionsViewModel {
-    provider == .claude ? claudeViewModel : codexViewModel
+    switch provider {
+    case .claude: claudeViewModel
+    case .codex: codexViewModel
+    case .antigravity: antigravityViewModel ?? claudeViewModel
+    }
   }
 
   private static func activity(for status: SessionStatus) -> AgentWorkspaceActivity {

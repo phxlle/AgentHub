@@ -73,6 +73,8 @@ public struct VoiceSessionTranscriptReader: VoiceSessionTranscriptReading {
       extractLatestClaudeAssistantText(fromJSONL: content)
     case .codex:
       extractLatestCodexAssistantText(fromJSONL: content)
+    case .antigravity:
+      extractLatestAntigravityAssistantText(fromJSONL: content)
     }
   }
 
@@ -148,6 +150,8 @@ public struct VoiceSessionTranscriptReader: VoiceSessionTranscriptReading {
       extractRecentClaudeTurns(fromJSONL: content, turnLimit: limit)
     case .codex:
       extractRecentCodexTurns(fromJSONL: content, turnLimit: limit)
+    case .antigravity:
+      extractRecentAntigravityTurns(fromJSONL: content, turnLimit: limit)
     }
     return trimToHistoryBudget(turns)
   }
@@ -218,6 +222,48 @@ public struct VoiceSessionTranscriptReader: VoiceSessionTranscriptReading {
       }
       let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !trimmed.isEmpty, !isCodexContextNoise(trimmed) else { continue }
+      turns.insert(VoiceTranscriptTurn(role: role, text: truncateTurn(trimmed)), at: 0)
+    }
+    return turns
+  }
+
+  /// Antigravity transcripts carry one step per line; a PLANNER_RESPONSE with
+  /// `content` is the agent's text, USER_INPUT wraps the prompt in <USER_REQUEST>.
+  static func extractLatestAntigravityAssistantText(fromJSONL content: String) -> String? {
+    for line in content.split(separator: "\n").reversed() {
+      guard let object = decodeObject(String(line)),
+            object["type"] as? String == "PLANNER_RESPONSE",
+            let message = object["content"] as? String else {
+        continue
+      }
+      let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else { continue }
+      return truncate(trimmed)
+    }
+    return nil
+  }
+
+  static func extractRecentAntigravityTurns(
+    fromJSONL content: String,
+    turnLimit: Int
+  ) -> [VoiceTranscriptTurn] {
+    var turns: [VoiceTranscriptTurn] = []
+    for line in content.split(separator: "\n").reversed() {
+      guard turns.count < turnLimit else { break }
+      guard let object = decodeObject(String(line)), let type = object["type"] as? String else { continue }
+      let text: String?
+      let role: String
+      switch type {
+      case "USER_INPUT":
+        role = "user"
+        text = AntigravitySessionJSONLParser.userRequestText(object)
+      case "PLANNER_RESPONSE":
+        role = "assistant"
+        text = object["content"] as? String
+      default:
+        continue
+      }
+      guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { continue }
       turns.insert(VoiceTranscriptTurn(role: role, text: truncateTurn(trimmed)), at: 0)
     }
     return turns

@@ -2,7 +2,7 @@
 //  MultiProviderMonitoringPanelView.swift
 //  AgentHub
 //
-//  Combines Claude + Codex monitored sessions into a single panel.
+//  Combines Claude + Codex + Antigravity monitored sessions into a single panel.
 //
 
 import AgentHubGitDiff
@@ -194,6 +194,7 @@ private struct ActiveWorkflowComparison {
 public struct MultiProviderMonitoringPanelView: View {
   @Bindable var claudeViewModel: CLISessionsViewModel
   @Bindable var codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
   @AppStorage(AgentHubDefaults.chatEnabled) private var chatEnabled = false
   @AppStorage(AgentHubDefaults.auxiliaryShellVisible) var isAuxiliaryShellVisible: Bool = false
   let onEmbeddedSidePanelVisibilityChange: (Bool) -> Void
@@ -264,6 +265,7 @@ public struct MultiProviderMonitoringPanelView: View {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     primarySessionId: Binding<String?>,
     workflowComparison: Binding<WorkflowSessionComparisonRequest?> = .constant(nil),
     selectedModuleLandingPath: Binding<String?> = .constant(nil),
@@ -275,6 +277,7 @@ public struct MultiProviderMonitoringPanelView: View {
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self._primarySessionId = primarySessionId
     self._workflowComparison = workflowComparison
     self._selectedModuleLandingPath = selectedModuleLandingPath
@@ -342,6 +345,10 @@ public struct MultiProviderMonitoringPanelView: View {
     }
     .onChange(of: codexViewModel.pendingFileOpen?.filePath) { _, _ in
       consumePendingFileOpen(from: codexViewModel, providerKind: .codex)
+    }
+    .onChange(of: antigravityViewModel?.pendingFileOpen?.filePath) { _, _ in
+      guard let antigravityViewModel else { return }
+      consumePendingFileOpen(from: antigravityViewModel, providerKind: .antigravity)
     }
     .onChange(of: autoOpenCandidate?.key) { _, _ in
       openAutoSidePanelIfNeeded()
@@ -527,6 +534,7 @@ public struct MultiProviderMonitoringPanelView: View {
 
   private var isLoading: Bool {
     claudeViewModel.isLoading || codexViewModel.isLoading
+      || (antigravityViewModel?.isLoading ?? false)
   }
 
   private var loadingState: some View {
@@ -546,6 +554,9 @@ public struct MultiProviderMonitoringPanelView: View {
     }
     if codexViewModel.isLoading {
       return codexViewModel.loadingState.message
+    }
+    if let antigravityViewModel, antigravityViewModel.isLoading {
+      return antigravityViewModel.loadingState.message
     }
     return "Loading sessions..."
   }
@@ -1675,7 +1686,12 @@ public struct MultiProviderMonitoringPanelView: View {
     let codexPending = codexViewModel.pendingHubSessions.map {
       ProviderMonitoringItem.pending(provider: .codex, viewModel: codexViewModel, pending: $0)
     }
-    return claudePending + codexPending
+    let antigravityPending = antigravityViewModel.map { viewModel in
+      viewModel.pendingHubSessions.map {
+        ProviderMonitoringItem.pending(provider: .antigravity, viewModel: viewModel, pending: $0)
+      }
+    } ?? []
+    return claudePending + codexPending + antigravityPending
   }
 
   private var monitoredItems: [ProviderMonitoringItem] {
@@ -1687,7 +1703,13 @@ public struct MultiProviderMonitoringPanelView: View {
       ProviderMonitoringItem.monitored(
         provider: .codex, viewModel: codexViewModel, session: $0.session, state: $0.state)
     }
-    return claudeItems + codexItems
+    let antigravityItems = antigravityViewModel.map { viewModel in
+      viewModel.monitoredSessions.map {
+        ProviderMonitoringItem.monitored(
+          provider: .antigravity, viewModel: viewModel, session: $0.session, state: $0.state)
+      }
+    } ?? []
+    return claudeItems + codexItems + antigravityItems
   }
 
   private var effectivePrimaryItem: ProviderMonitoringItem? {
@@ -1723,6 +1745,7 @@ public struct MultiProviderMonitoringPanelView: View {
   private var allSelectedRepositories: [SelectedRepository] {
     WorktreeModuleResolver.mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     ).sorted { $0.path < $1.path }
   }
 
@@ -1737,6 +1760,9 @@ public struct MultiProviderMonitoringPanelView: View {
   private var emptyStateViewModel: CLISessionsViewModel {
     if !claudeViewModel.selectedRepositories.isEmpty { return claudeViewModel }
     if !codexViewModel.selectedRepositories.isEmpty { return codexViewModel }
+    if let antigravityViewModel, !antigravityViewModel.selectedRepositories.isEmpty {
+      return antigravityViewModel
+    }
     return claudeViewModel
   }
 
@@ -1855,11 +1881,12 @@ public struct MultiProviderMonitoringPanelView: View {
   ) {
     guard selectedModuleLandingPath == nil else { return }
     let snapshot = snapshot ?? makeItemSnapshot()
-    guard case .monitored(.codex, let viewModel, let session, _) = snapshot.effectivePrimaryItem
+    guard case .monitored(_, let viewModel, let session, _) = snapshot.effectivePrimaryItem
     else {
       return
     }
 
+    // No-op for providers without live polling (the view model guards on its own kind).
     viewModel.ensureLiveMonitoring(sessionId: session.id)
   }
 

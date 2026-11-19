@@ -22,28 +22,32 @@ final class WorktreeSessionImportCoordinator {
   func importInitial(
     _ worktree: WorktreeSettingsWorktree,
     claudeViewModel: CLISessionsViewModel,
-    codexViewModel: CLISessionsViewModel
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil
   ) async {
     await importNextPage(
       worktree,
       pageSize: 1,
       shouldFocusWorktree: true,
       claudeViewModel: claudeViewModel,
-      codexViewModel: codexViewModel
+      codexViewModel: codexViewModel,
+      antigravityViewModel: antigravityViewModel
     )
   }
 
   func showMore(
     _ worktree: WorktreeSettingsWorktree,
     claudeViewModel: CLISessionsViewModel,
-    codexViewModel: CLISessionsViewModel
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil
   ) async {
     await importNextPage(
       worktree,
       pageSize: pageSize,
       shouldFocusWorktree: true,
       claudeViewModel: claudeViewModel,
-      codexViewModel: codexViewModel
+      codexViewModel: codexViewModel,
+      antigravityViewModel: antigravityViewModel
     )
   }
 
@@ -52,7 +56,8 @@ final class WorktreeSessionImportCoordinator {
     pageSize: Int,
     shouldFocusWorktree: Bool,
     claudeViewModel: CLISessionsViewModel,
-    codexViewModel: CLISessionsViewModel
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel?
   ) async {
     let key = normalized(worktree.path)
     guard importingWorktreePaths.insert(key).inserted else { return }
@@ -63,6 +68,7 @@ final class WorktreeSessionImportCoordinator {
     if shouldFocusWorktree {
       await focus(worktree, in: claudeViewModel)
       await focus(worktree, in: codexViewModel)
+      if let antigravityViewModel { await focus(worktree, in: antigravityViewModel) }
     }
 
     let requestLimit = pageSize + 1
@@ -77,10 +83,18 @@ final class WorktreeSessionImportCoordinator {
       limit: requestLimit
     )
 
-    let providerPages = [
+    var providerPages = [
       ProviderImportPage(providerKind: .claude, page: loadedClaudePage),
       ProviderImportPage(providerKind: .codex, page: loadedCodexPage),
     ]
+    if let antigravityViewModel {
+      let loadedAntigravityPage = await antigravityViewModel.loadLatestSessionsForImport(
+        inWorktreePath: key,
+        excludingSessionIds: excludedSessionIds(in: key, for: antigravityViewModel),
+        limit: requestLimit
+      )
+      providerPages.append(ProviderImportPage(providerKind: .antigravity, page: loadedAntigravityPage))
+    }
     let candidates = providerPages
       .flatMap { providerPage in
         providerPage.page.sessions.map {
@@ -97,9 +111,14 @@ final class WorktreeSessionImportCoordinator {
     let selectedCandidates = Array(candidates.prefix(pageSize))
     let claudeSessions = selectedCandidates.sessions(for: .claude)
     let codexSessions = selectedCandidates.sessions(for: .codex)
+    let antigravitySessions = selectedCandidates.sessions(for: .antigravity)
 
     await claudeViewModel.importMonitoredSessions(claudeSessions)
     await codexViewModel.importMonitoredSessions(codexSessions)
+    if let antigravityViewModel, !antigravitySessions.isEmpty {
+      await antigravityViewModel.importMonitoredSessions(antigravitySessions)
+      await antigravityViewModel.refreshImportedWorktreeSessions()
+    }
 
     if !claudeSessions.isEmpty {
       await claudeViewModel.refreshImportedWorktreeSessions()

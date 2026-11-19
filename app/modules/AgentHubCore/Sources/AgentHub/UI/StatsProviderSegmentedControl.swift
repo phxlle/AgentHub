@@ -2,7 +2,7 @@
 //  StatsProviderSegmentedControl.swift
 //  AgentHub
 //
-//  Compact segmented control for switching between Claude and Codex stats.
+//  Compact segmented control for switching between Claude, Codex and Antigravity stats.
 //
 
 import SwiftUI
@@ -12,36 +12,25 @@ public struct StatsProviderSegmentedControl: View {
   @Binding var selectedProvider: SessionProviderKind
   let claudeSessionCount: Int
   let codexSessionCount: Int
+  let antigravitySessionCount: Int
 
   public init(
     selectedProvider: Binding<SessionProviderKind>,
     claudeSessionCount: Int = 0,
-    codexSessionCount: Int = 0
+    codexSessionCount: Int = 0,
+    antigravitySessionCount: Int = 0
   ) {
     self._selectedProvider = selectedProvider
     self.claudeSessionCount = claudeSessionCount
     self.codexSessionCount = codexSessionCount
+    self.antigravitySessionCount = antigravitySessionCount
   }
 
   public var body: some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 16) {
-        segmentButton(for: .claude, count: claudeSessionCount)
-        segmentButton(for: .codex, count: codexSessionCount)
-        Spacer()
-      }
-
-      // Underline
-      GeometryReader { geometry in
-        let segmentWidth = geometry.size.width / 2
-        Rectangle()
-          .fill(Color.brandPrimary(for: selectedProvider))
-          .frame(width: selectedProvider == .claude ? 80 : 100, height: 2)
-          .offset(x: selectedProvider == .claude ? 0 : 96)
-          .animation(.easeInOut(duration: 0.2), value: selectedProvider)
-      }
-      .frame(height: 2)
-      .padding(.top, 6)
+    UnderlineSegmentedControl(tint: Color.brandPrimary(for: selectedProvider), spacing: 10) {
+      segmentButton(for: .claude, count: claudeSessionCount)
+      segmentButton(for: .codex, count: codexSessionCount)
+      segmentButton(for: .antigravity, count: antigravitySessionCount)
     }
     .padding(.horizontal, 4)
   }
@@ -50,26 +39,19 @@ public struct StatsProviderSegmentedControl: View {
     Button {
       selectedProvider = provider
     } label: {
-      HStack(spacing: 6) {
-        Text("\(provider.rawValue) (\(count))")
-          .font(.geist(size: 13, weight: .medium))
-          .foregroundColor(
-            selectedProvider == provider
-              ? Color.brandPrimary(for: provider)
-              : .secondary
-          )
-
-        if provider == .codex {
-          Text("Beta")
-            .font(.secondaryCaption)
-            .foregroundStyle(selectedProvider == .codex ? .secondary : .tertiary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(selectedProvider == .codex ? Color.gray.opacity(0.2) : Color.clear)
-            .clipShape(Capsule())
-        }
-      }
-      .contentShape(Rectangle())
+      // Three tabs must fit the 280pt stats menu, so no Beta pill here; the
+      // label shrinks a little instead of truncating.
+      Text("\(provider.rawValue) (\(count))")
+        .font(.geist(size: 13, weight: .medium))
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .foregroundColor(
+          selectedProvider == provider
+            ? Color.brandPrimary(for: provider)
+            : .secondary
+        )
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
   }

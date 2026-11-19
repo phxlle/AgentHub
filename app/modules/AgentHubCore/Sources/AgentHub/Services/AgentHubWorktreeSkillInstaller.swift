@@ -92,7 +92,8 @@ enum AgentHubWorktreeSkillInstaller {
 
 /// Writes one bundled skill into every provider's user-level skills directory
 /// (`~/.claude/skills/<name>/SKILL.md`, `~/.codex/skills/<name>/SKILL.md` +
-/// `agents/openai.yaml`). Idempotent: unchanged files are left untouched.
+/// `agents/openai.yaml`, `~/.gemini/antigravity-cli/skills/<name>/SKILL.md`).
+/// Idempotent: unchanged files are left untouched.
 enum AgentHubBundledSkillFiles {
   static func installForAllProviders(
     skillName: String,
@@ -109,6 +110,11 @@ enum AgentHubBundledSkillFiles {
       .appendingPathComponent(".codex", isDirectory: true)
       .appendingPathComponent("skills", isDirectory: true)
       .appendingPathComponent(skillName, isDirectory: true)
+    let antigravitySkillDirectory = homeDirectory
+      .appendingPathComponent(".gemini", isDirectory: true)
+      .appendingPathComponent("antigravity-cli", isDirectory: true)
+      .appendingPathComponent("skills", isDirectory: true)
+      .appendingPathComponent(skillName, isDirectory: true)
 
     try write(
       skillMarkdown,
@@ -118,6 +124,11 @@ enum AgentHubBundledSkillFiles {
     try write(
       skillMarkdown,
       to: codexSkillDirectory.appendingPathComponent("SKILL.md", isDirectory: false),
+      fileManager: fileManager
+    )
+    try write(
+      skillMarkdown,
+      to: antigravitySkillDirectory.appendingPathComponent("SKILL.md", isDirectory: false),
       fileManager: fileManager
     )
     try write(

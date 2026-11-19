@@ -19,13 +19,24 @@ enum CLIPathResolver {
     )
   }
 
+  static func antigravityPaths(
+    additionalPaths: [String],
+    homeDirectory: String = NSHomeDirectory()
+  ) -> [String] {
+    uniquePaths(
+      additionalPaths
+        + ["\(homeDirectory)/.local/bin"]
+        + ClaudeCodePathResolver.commonDeveloperPaths(homeDirectory: homeDirectory)
+    )
+  }
+
   static func executableSearchPaths(
     additionalPaths: [String] = [],
     homeDirectory: String = NSHomeDirectory()
   ) -> [String] {
     uniquePaths(
       additionalPaths
-        + ["\(homeDirectory)/.claude/local", "\(homeDirectory)/.codex/local", "\(homeDirectory)/.codex/bin"]
+        + ["\(homeDirectory)/.claude/local", "\(homeDirectory)/.codex/local", "\(homeDirectory)/.codex/bin", "\(homeDirectory)/.local/bin"]
         + ClaudeCodePathResolver.commonDeveloperPaths(homeDirectory: homeDirectory)
     )
   }

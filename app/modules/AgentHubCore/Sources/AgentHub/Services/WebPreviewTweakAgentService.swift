@@ -163,6 +163,11 @@ final class TweakAgentProcessRunner: TweakAgentCommandRunning, @unchecked Sendab
         command: cliConfiguration.executableName,
         additionalPaths: cliConfiguration.additionalPaths
       )
+    case .antigravity:
+      executablePath = TerminalLauncher.findAntigravityExecutable(
+        command: cliConfiguration.executableName,
+        additionalPaths: cliConfiguration.additionalPaths
+      )
     }
     guard let executablePath else {
       throw WebPreviewTweakAgentError.executableNotFound(cliConfiguration.executableName)
@@ -254,6 +259,12 @@ final class TweakAgentProcessRunner: TweakAgentCommandRunning, @unchecked Sendab
         "--skip-git-repo-check",
         "--sandbox", "workspace-write",
         "--cd", workingDirectory,
+        "\(systemPrompt)\n\nTask:\n\(prompt)"
+      ]
+    case .antigravity:
+      return prefix + [
+        "-p",
+        "--mode", "accept-edits",
         "\(systemPrompt)\n\nTask:\n\(prompt)"
       ]
     }

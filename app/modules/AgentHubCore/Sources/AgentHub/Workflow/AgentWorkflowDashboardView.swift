@@ -287,7 +287,7 @@ public struct AgentWorkflowDashboardView: View {
         } description: {
           Text(
             sessionSearchText.isEmpty
-              ? "Loaded Codex and Claude sessions will appear here."
+              ? "Loaded Codex, Claude and Antigravity sessions will appear here."
               : "Try another session, branch, repository, or provider."
           )
         }
@@ -874,6 +874,9 @@ private struct DetectedBranchSessionDetail: View {
           Button("Claude") {
             onStartSession(workflowID, .claude, nil)
           }
+          Button("Antigravity") {
+            onStartSession(workflowID, .antigravity, nil)
+          }
         } label: {
           Label("Start session", systemImage: "plus")
         }
@@ -1094,6 +1097,7 @@ private struct CreateManualWorkflowSheet: View {
           Picker("Implementation agent", selection: $provider) {
             Text("Codex").tag(SessionProviderKind.codex)
             Text("Claude").tag(SessionProviderKind.claude)
+            Text("Antigravity").tag(SessionProviderKind.antigravity)
           }
           .pickerStyle(.segmented)
           .labelsHidden()
@@ -1202,6 +1206,9 @@ private struct ManualWorkflowEmptyState: View {
           }
           Button("Start Claude") {
             onStartSession(workflowID, .claude, nil)
+          }
+          Button("Start Antigravity") {
+            onStartSession(workflowID, .antigravity, nil)
           }
         }
         .buttonStyle(.bordered)

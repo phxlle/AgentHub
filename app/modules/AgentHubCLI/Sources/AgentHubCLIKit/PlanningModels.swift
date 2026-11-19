@@ -126,7 +126,7 @@ public struct HarnessCapabilities: Codable, Equatable, Sendable {
   public var capabilityNames: [String] { skills.map(\.name) + mcpServers }
 }
 
-/// One subtask mapped to an installed agent harness (Claude Code / Codex).
+/// One subtask mapped to an installed agent harness (Claude Code / Codex / Antigravity).
 ///
 /// `assignedProvider` is the harness AgentHub will launch — `nil` means the
 /// choice is deferred to the calling agent (more than one harness installed, or

@@ -26,6 +26,7 @@ struct GitHubReviewsView: View {
   @Bindable private var viewModel: GitHubReviewsViewModel
   @Bindable private var claudeSessionsViewModel: CLISessionsViewModel
   @Bindable private var codexSessionsViewModel: CLISessionsViewModel
+  private let antigravitySessionsViewModel: CLISessionsViewModel?
   @Bindable private var promptLibrary: GitHubPromptLibrary
   private let onReview:
     (GitHubProjectPullRequest, SessionProviderKind, GitHubPromptTemplate) async -> Void
@@ -44,6 +45,7 @@ struct GitHubReviewsView: View {
     viewModel: GitHubReviewsViewModel,
     claudeSessionsViewModel: CLISessionsViewModel,
     codexSessionsViewModel: CLISessionsViewModel,
+    antigravitySessionsViewModel: CLISessionsViewModel? = nil,
     promptLibrary: GitHubPromptLibrary = .shared,
     onReview:
       @escaping (
@@ -56,6 +58,7 @@ struct GitHubReviewsView: View {
     self.viewModel = viewModel
     self.claudeSessionsViewModel = claudeSessionsViewModel
     self.codexSessionsViewModel = codexSessionsViewModel
+    self.antigravitySessionsViewModel = antigravitySessionsViewModel
     self.promptLibrary = promptLibrary
     self.onReview = onReview
     self.onOpenSession = onOpenSession
@@ -295,6 +298,7 @@ struct GitHubReviewsView: View {
               Spacer()
               promptMenu(provider: .codex, pullRequest: request)
               promptMenu(provider: .claude, pullRequest: request)
+              promptMenu(provider: .antigravity, pullRequest: request)
             }
             .padding()
             reviewSessionsCell(
@@ -638,6 +642,7 @@ struct GitHubReviewsView: View {
         HStack(spacing: DesignTokens.Spacing.xs) {
           promptMenu(provider: .codex, pullRequest: row.pullRequest)
           promptMenu(provider: .claude, pullRequest: row.pullRequest)
+          promptMenu(provider: .antigravity, pullRequest: row.pullRequest)
         }
       }
       .width(min: 145, ideal: 160)
@@ -684,7 +689,7 @@ struct GitHubReviewsView: View {
       GitHubReviewTableRow.withoutSessions(rows)
         .map(\.pullRequest))
     return Menu {
-      ForEach([SessionProviderKind.codex, .claude], id: \.self) { provider in
+      ForEach([SessionProviderKind.codex, .claude, .antigravity], id: \.self) { provider in
         Section(provider.rawValue) {
           ForEach(promptLibrary.templates) { template in
             Button("\(provider.rawValue) · \(template.name)") {
@@ -912,7 +917,11 @@ struct GitHubReviewsView: View {
   }
 
   private func sessionsViewModel(for provider: SessionProviderKind) -> CLISessionsViewModel {
-    provider == .claude ? claudeSessionsViewModel : codexSessionsViewModel
+    switch provider {
+    case .claude: claudeSessionsViewModel
+    case .codex: codexSessionsViewModel
+    case .antigravity: antigravitySessionsViewModel ?? claudeSessionsViewModel
+    }
   }
 
   private func sendPullAndReviewAgain(
@@ -994,7 +1003,17 @@ struct GitHubReviewsView: View {
         statuses: codexSessionsViewModel.sessionStatuses,
         ticketKeysBySessionID: ticketKeys(for: codexSessionsViewModel)
       ),
-    ]
+    ] + (antigravitySessionsViewModel.map {
+      [GitHubReviewSessionInventory(
+        provider: .antigravity,
+        sessions: $0.allSessions,
+        pendingSessions: $0.pendingHubSessions,
+        resolvedPendingSessionIDs: $0.resolvedPendingSessionHistory,
+        customNames: $0.sessionCustomNames,
+        statuses: $0.sessionStatuses,
+        ticketKeysBySessionID: ticketKeys(for: $0)
+      )]
+    } ?? [])
   }
 
   /// Ticket keys per session, via the Sprint board's cached detector. Project keys
@@ -1030,6 +1049,12 @@ struct GitHubReviewsView: View {
       codexSessionsViewModel.resolvedPendingSessionHistory,
       provider: .codex
     )
+    if let antigravitySessionsViewModel {
+      await viewModel.resolveReviewLaunches(
+        antigravitySessionsViewModel.resolvedPendingSessionHistory,
+        provider: .antigravity
+      )
+    }
     applyReviewSessionTitles()
 
     if viewModel.shouldRecoverLegacySessionLinks {
@@ -1045,6 +1070,13 @@ struct GitHubReviewsView: View {
         provider: .codex,
         searchResults: resolvedCodexResults
       )
+      if let antigravitySessionsViewModel {
+        let resolvedAntigravityResults = await antigravitySessionsViewModel.githubReviewSessionSearchResults()
+        await viewModel.recoverReviewSessions(
+          provider: .antigravity,
+          searchResults: resolvedAntigravityResults
+        )
+      }
       viewModel.finishLegacySessionRecovery()
     }
 
@@ -1052,6 +1084,7 @@ struct GitHubReviewsView: View {
     async let restoreClaude: Void = claudeSessionsViewModel.restoreWorkspaceSessions(references)
     async let restoreCodex: Void = codexSessionsViewModel.restoreWorkspaceSessions(references)
     _ = await (restoreClaude, restoreCodex)
+    await antigravitySessionsViewModel?.restoreWorkspaceSessions(references)
   }
 
   private func applyReviewSessionTitles() {
@@ -1060,6 +1093,9 @@ struct GitHubReviewsView: View {
     }
     for (sessionID, title) in viewModel.linkedSessionTitles(provider: .codex) {
       codexSessionsViewModel.setCustomName(title, forSessionId: sessionID)
+    }
+    for (sessionID, title) in viewModel.linkedSessionTitles(provider: .antigravity) {
+      antigravitySessionsViewModel?.setCustomName(title, forSessionId: sessionID)
     }
   }
 

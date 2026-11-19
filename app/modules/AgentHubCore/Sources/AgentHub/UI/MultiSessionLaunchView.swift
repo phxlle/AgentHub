@@ -2,7 +2,7 @@
 //  MultiSessionLaunchView.swift
 //  AgentHub
 //
-//  Always-visible session launcher for starting Claude, Codex, or both
+//  Always-visible session launcher for starting Claude, Codex, Antigravity, or several at once
 //  with a shared prompt. Supports local mode and worktree mode.
 //
 
@@ -100,7 +100,7 @@ public struct MultiSessionLaunchView: View {
 
             worktreeNamingSection
 
-            if viewModel.selectedRepository != nil && viewModel.isClaudeSelected && !viewModel.isCodexSelected && viewModel.workMode == .local {
+            if viewModel.selectedRepository != nil && viewModel.selectedProviders == [.claude] && viewModel.workMode == .local {
               worktreeRow
             }
           }
@@ -394,14 +394,12 @@ public struct MultiSessionLaunchView: View {
   private var promptPlaceholder: String {
     if viewModel.launchMode == .smart {
       return "Describe what you want to build..."
-    } else if viewModel.claudeMode == .enabledDangerously && !viewModel.isCodexSelected {
+    } else if viewModel.claudeMode == .enabledDangerously && viewModel.selectedProviders == [.claude] {
       return "Optional: initial prompt (Claude dangerous mode enabled)..."
-    } else if viewModel.isClaudeSelected && viewModel.isCodexSelected {
-      return "Optional: initial prompt for both sessions..."
-    } else if viewModel.isClaudeSelected {
-      return "Optional: initial prompt for Claude session..."
-    } else if viewModel.isCodexSelected {
-      return "Optional: initial prompt for Codex session..."
+    } else if viewModel.selectedProviders.count > 1 {
+      return "Optional: initial prompt for all sessions..."
+    } else if let provider = viewModel.selectedProviders.first {
+      return "Optional: initial prompt for \(provider.rawValue) session..."
     } else {
       return "Select a provider..."
     }
@@ -688,18 +686,29 @@ public struct MultiSessionLaunchView: View {
   @ViewBuilder
   private var manualWorktreeNamingFields: some View {
     if viewModel.worktreeNamingMode == .manual {
-      if viewModel.isClaudeSelected && viewModel.isCodexSelected {
+      if viewModel.selectedProviders.count > 1 {
         VStack(alignment: .leading, spacing: 6) {
-          manualWorktreeNamingRow(
-            providerLabel: "Claude",
-            branchName: $viewModel.manualClaudeBranchName,
-            directoryName: $viewModel.manualClaudeDirectoryName
-          )
-          manualWorktreeNamingRow(
-            providerLabel: "Codex",
-            branchName: $viewModel.manualCodexBranchName,
-            directoryName: $viewModel.manualCodexDirectoryName
-          )
+          if viewModel.isClaudeSelected {
+            manualWorktreeNamingRow(
+              providerLabel: "Claude",
+              branchName: $viewModel.manualClaudeBranchName,
+              directoryName: $viewModel.manualClaudeDirectoryName
+            )
+          }
+          if viewModel.isCodexSelected {
+            manualWorktreeNamingRow(
+              providerLabel: "Codex",
+              branchName: $viewModel.manualCodexBranchName,
+              directoryName: $viewModel.manualCodexDirectoryName
+            )
+          }
+          if viewModel.isAntigravitySelected {
+            manualWorktreeNamingRow(
+              providerLabel: "Antigravity",
+              branchName: $viewModel.manualAntigravityBranchName,
+              directoryName: $viewModel.manualAntigravityDirectoryName
+            )
+          }
         }
         .transition(manualNamingFieldsTransition)
       } else if viewModel.hasAnyProviderSelected {
@@ -798,6 +807,11 @@ public struct MultiSessionLaunchView: View {
         isSelected: codexSelectionBinding,
         disabled: viewModel.isPlanModeEnabled
       )
+      providerPill(
+        label: "Antigravity",
+        isSelected: antigravitySelectionBinding,
+        disabled: false
+      )
       Spacer()
     }
   }
@@ -814,8 +828,25 @@ public struct MultiSessionLaunchView: View {
         withAnimation(.easeInOut(duration: 0.2)) {
           if style == .compact && newValue {
             viewModel.claudeMode = .disabled
+            viewModel.isAntigravitySelected = false
           }
           viewModel.isCodexSelected = newValue
+        }
+      }
+    )
+  }
+
+  /// Same compact-mode rule as Codex: turning Antigravity ON turns Claude off.
+  private var antigravitySelectionBinding: Binding<Bool> {
+    Binding(
+      get: { viewModel.isAntigravitySelected },
+      set: { newValue in
+        withAnimation(.easeInOut(duration: 0.2)) {
+          if style == .compact && newValue {
+            viewModel.claudeMode = .disabled
+            viewModel.isCodexSelected = false
+          }
+          viewModel.isAntigravitySelected = newValue
         }
       }
     )
@@ -840,8 +871,9 @@ public struct MultiSessionLaunchView: View {
     Button(action: {
       withAnimation(.easeInOut(duration: 0.2)) {
         if style == .compact {
-          // Mutually exclusive in the sheet: activating Claude deactivates Codex.
+          // Mutually exclusive in the sheet: activating Claude deactivates Codex and Antigravity.
           viewModel.isCodexSelected = false
+          viewModel.isAntigravitySelected = false
         }
         viewModel.claudeMode = viewModel.claudeMode.next
       }
@@ -994,6 +1026,9 @@ public struct MultiSessionLaunchView: View {
       }
       if viewModel.isCodexSelected && viewModel.codexProgress != .idle {
         progressRow(label: "Codex", progress: viewModel.codexProgress)
+      }
+      if viewModel.isAntigravitySelected && viewModel.antigravityProgress != .idle {
+        progressRow(label: "Antigravity", progress: viewModel.antigravityProgress)
       }
     }
     .padding(8)
@@ -1551,16 +1586,11 @@ public struct MultiSessionLaunchView: View {
       }
       return viewModel.workMode == .worktree ? "Generating worktrees..." : "Launching..."
     }
-    if viewModel.isClaudeSelected && viewModel.isCodexSelected {
-      return "Launch Claude + Codex"
+    let providers = viewModel.selectedProviders
+    if providers.isEmpty {
+      return "Launch"
     }
-    if viewModel.isClaudeSelected {
-      return "Launch Claude"
-    }
-    if viewModel.isCodexSelected {
-      return "Launch Codex"
-    }
-    return "Launch"
+    return "Launch " + providers.map(\.rawValue).joined(separator: " + ")
   }
 }
 

@@ -2,7 +2,7 @@
 //  ChatTranscriptReader.swift
 //  AgentHub
 //
-//  Turns a Claude or Codex session transcript (JSONL) into chat items for the
+//  Turns a Claude, Codex or Antigravity session transcript (JSONL) into chat items for the
 //  Chat view: your messages, the agent's replies, and compact tool steps.
 //  Read-only and incremental: only bytes appended since the last read are parsed.
 //
@@ -201,12 +201,15 @@ public actor ChatTranscriptReader: ChatTranscriptReading {
       }
       lineNumber += 1
       let idPrefix = "\(path)#\(newOffset)-\(lineNumber)"
-      if provider == .claude {
+      switch provider {
+      case .claude:
         let entry = Self.claudeEntry(line: Data(line), idPrefix: idPrefix)
         parsedItems.append(contentsOf: entry.items)
         for event in entry.events { runtime.apply(event) }
-      } else {
+      case .codex:
         parsedItems.append(contentsOf: Self.codexItems(line: Data(line), idPrefix: idPrefix))
+      case .antigravity:
+        parsedItems.append(contentsOf: Self.antigravityItems(line: Data(line), idPrefix: idPrefix))
       }
     }
     if parsedItems.count > maxItems {
@@ -446,6 +449,36 @@ public actor ChatTranscriptReader: ChatTranscriptReading {
       add(.tool(name: name, summary: codexToolSummary(raw)))
     default:
       break  // reasoning (encrypted), tool outputs
+    }
+    return items
+  }
+
+  // MARK: - Antigravity
+
+  /// One step per line: USER_INPUT wraps the prompt in `<USER_REQUEST>`,
+  /// PLANNER_RESPONSE carries the agent text and its `tool_calls`; GENERIC is tool output.
+  static func antigravityItems(line: Data, idPrefix: String) -> [ChatTranscriptItem] {
+    guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return [] }
+    let timestamp = (object["created_at"] as? String).flatMap(parseDate)
+    var items: [ChatTranscriptItem] = []
+    func add(_ kind: ChatTranscriptItem.Kind) {
+      items.append(ChatTranscriptItem(id: "\(idPrefix)-\(items.count)", kind: kind, timestamp: timestamp))
+    }
+
+    switch object["type"] as? String {
+    case "USER_INPUT":
+      if let text = AntigravitySessionJSONLParser.userRequestText(object) { add(.user(text)) }
+    case "PLANNER_RESPONSE":
+      let text = (object["content"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      if !text.isEmpty { add(.assistant(text)) }
+      for call in object["tool_calls"] as? [[String: Any]] ?? [] {
+        let name = call["name"] as? String ?? "tool"
+        let args = call["args"] as? [String: Any] ?? [:]
+        let raw = (try? JSONSerialization.data(withJSONObject: args)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        add(.tool(name: name, summary: codexToolSummary(raw)))
+      }
+    default:
+      break  // GENERIC tool output
     }
     return items
   }

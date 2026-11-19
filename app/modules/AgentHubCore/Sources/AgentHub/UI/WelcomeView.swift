@@ -61,7 +61,7 @@ public struct WelcomeView: View {
           .font(.system(size: 22, weight: .semibold, design: .monospaced))
           .foregroundColor(.primary)
 
-        Text("Start a new session with Codex or Claude.")
+        Text("Start a new session with Claude, Codex or Antigravity.")
           .font(.system(size: 12, weight: .regular, design: .monospaced))
           .foregroundColor(.secondary)
           .multilineTextAlignment(.center)

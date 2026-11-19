@@ -1,7 +1,7 @@
 import Foundation
 
 /// Turns a bundled, multi-part prompt into a delegation plan: discrete subtasks,
-/// a suggested agent harness (Claude Code / Codex) for each grounded in that
+/// a suggested agent harness (Claude Code / Codex / Antigravity) for each grounded in that
 /// harness's real skills + MCP tools, a branch suggestion, and per-subtask launch
 /// instructions.
 public protocol AgentHubPlanning: Sendable {
@@ -14,7 +14,7 @@ public protocol AgentHubPlanning: Sendable {
 
 /// Default planner.
 ///
-/// AgentHub launches an agent **harness** (Claude Code or Codex) — it cannot pick
+/// AgentHub launches an agent **harness** (Claude Code, Codex or Antigravity) — it cannot pick
 /// or configure the underlying model — so the plan never names a model, only the
 /// harness. Task decomposition is the calling agent's job (it passes the subtasks
 /// it inferred). Harness selection is suggested by matching each subtask against
@@ -141,7 +141,7 @@ public struct AgentHubPlanningService: AgentHubPlanning {
       return PlanAssignment(
         subtask: subtask,
         assignedProvider: nil,
-        rationale: "No agent harness detected; install Claude Code or Codex to delegate this subtask.",
+        rationale: "No agent harness detected; install Claude Code, Codex or Antigravity to delegate this subtask.",
         instructions: Self.unassignedInstructions(for: subtask, branch: branchSuggestion),
         branchSuggestion: branchSuggestion
       )
@@ -268,7 +268,7 @@ public struct AgentHubPlanningService: AgentHubPlanning {
     var notes: [String] = []
     switch detectedCLIs.count {
     case 0:
-      notes.append("No agent harnesses (Claude Code, Codex) were found on PATH. Subtasks are left unassigned — install Claude Code and/or Codex to enable delegation.")
+      notes.append("No agent harnesses (Claude Code, Codex, Antigravity) were found on PATH. Subtasks are left unassigned — install Claude Code, Codex and/or Antigravity to enable delegation.")
     case 1:
       notes.append("Only one agent harness was detected (\(detectedCLIs[0].provider.harnessName)); every subtask is assigned to it.")
     default:
@@ -288,7 +288,7 @@ public struct AgentHubPlanningService: AgentHubPlanning {
       }
     }
 
-    notes.append("AgentHub launches the agent harness only; it cannot configure the model. Present the harness (Claude Code or Codex) for each subtask — never a model.")
+    notes.append("AgentHub launches the agent harness only; it cannot configure the model. Present the harness (Claude Code, Codex or Antigravity) for each subtask — never a model.")
     notes.append("This plan is advisory. If the user explicitly approves worktree creation, create one worktree per approved subtask with agenthub_create_worktree_sessions.")
     return notes
   }
@@ -368,7 +368,7 @@ public struct AgentHubPlanningService: AgentHubPlanning {
   static func unassignedInstructions(for subtask: Subtask, branch: String) -> String {
     let focus = subtask.tags.map(\.displayName).joined(separator: ", ")
     return """
-    No agent harness is installed — install Claude Code or Codex, then run this subtask.
+    No agent harness is installed — install Claude Code, Codex or Antigravity, then run this subtask.
     Work only on this subtask: \(subtask.detail)
     Branch: \(branch). Stay scoped to this subtask and avoid editing files owned by other parallel subtasks.
     Primary focus areas: \(focus).

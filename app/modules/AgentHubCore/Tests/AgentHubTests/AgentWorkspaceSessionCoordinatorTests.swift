@@ -34,9 +34,18 @@ struct AgentWorkspaceSessionCoordinatorTests {
       watcher: codexWatcher,
       store: store
     )
+    let antigravityViewModel = makeCoordinatorViewModel(
+      provider: .antigravity,
+      monitor: WorkspaceCoordinatorMonitorSpy(
+        sessionsByID: provider == .antigravity ? [session.id: session] : [:]
+      ),
+      watcher: WorkspaceCoordinatorWatcherSpy(),
+      store: store
+    )
     let coordinator = AgentWorkspaceSessionCoordinator(
       claudeViewModel: claudeViewModel,
-      codexViewModel: codexViewModel
+      codexViewModel: codexViewModel,
+      antigravityViewModel: antigravityViewModel
     )
 
     await coordinator.monitorDetectedSession(

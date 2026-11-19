@@ -7,14 +7,16 @@ import Testing
 
 @Suite("AgentCLIDetector")
 struct AgentCLIDetectorTests {
-  @Test("Detects both harnesses when both executables are on PATH")
-  func detectsBoth() async {
+  @Test("Detects all harnesses when their executables are on PATH")
+  func detectsAll() async {
     let detector = AgentCLIDetector(
       pathDirectories: ["/opt/bin", "/usr/local/bin"],
-      isExecutable: { path in path == "/opt/bin/claude" || path == "/usr/local/bin/codex" }
+      isExecutable: { path in
+        path == "/opt/bin/claude" || path == "/usr/local/bin/codex" || path == "/usr/local/bin/agy"
+      }
     )
     let detected = await detector.detectInstalledCLIs()
-    #expect(detected.map(\.provider) == [.claude, .codex])
+    #expect(detected.map(\.provider) == [.claude, .codex, .antigravity])
   }
 
   @Test("Returns empty when nothing is installed")
@@ -32,6 +34,7 @@ struct HarnessNamingTests {
   func harnessNames() {
     #expect(WorktreeLaunchProvider.claude.harnessName == "Claude Code")
     #expect(WorktreeLaunchProvider.codex.harnessName == "Codex")
+    #expect(WorktreeLaunchProvider.antigravity.harnessName == "Antigravity")
   }
 }
 
@@ -81,6 +84,24 @@ struct HarnessCapabilityDetectorTests {
 
     #expect(caps.skills.map(\.name) == ["figma-implement-design"])
     #expect(Set(caps.mcpServers) == ["xctrace-analyzer", "node_repl"])
+  }
+
+  @Test("Detects Antigravity skills and MCP servers from mcp_config.json")
+  func detectsAntigravity() async throws {
+    let home = Self.makeHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    try Self.writeSkill(home: home, provider: ".gemini/antigravity-cli", slug: "deploy",
+                        name: "deploy", description: "Deploys the app.")
+    let configDir = home.appendingPathComponent(".gemini/config")
+    try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+    try #"{"mcpServers": {"agenthub": {"command": "x"}, "pencil": {}}}"#
+      .write(to: configDir.appendingPathComponent("mcp_config.json"), atomically: true, encoding: .utf8)
+
+    let caps = await HarnessCapabilityDetector(homeDirectory: home)
+      .detectCapabilities(for: .antigravity, repositoryPath: nil)
+
+    #expect(caps.skills.map(\.name) == ["deploy"])
+    #expect(caps.mcpServers == ["agenthub", "pencil"])
   }
 
   @Test("Returns empty capabilities when nothing is installed")

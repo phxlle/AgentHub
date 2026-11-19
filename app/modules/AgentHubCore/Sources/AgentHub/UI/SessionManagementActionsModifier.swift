@@ -102,10 +102,7 @@ struct SessionManagementActionsModifier: ViewModifier {
   }
 
   private var sessionsViewModel: CLISessionsViewModel? {
-    switch providerKind {
-    case .claude: agentHub?.claudeSessionsViewModel
-    case .codex: agentHub?.codexSessionsViewModel
-    }
+    agentHub?.sessionsViewModel(for: providerKind)
   }
 
   private var workflowViewModel: AgentWorkflowDashboardViewModel? {

@@ -66,7 +66,13 @@ public actor WorkspaceSessionProcessProviderResolver: WorkspaceSessionProcessPro
     let matches = SessionProviderKind.allCases.filter { provider in
       let configuredExecutable = executableNames[provider]
         .map { URL(fileURLWithPath: $0).lastPathComponent.lowercased() }
-      let signatures = [configuredExecutable, provider == .claude ? "claude" : "codex"]
+      let defaultExecutable: String =
+        switch provider {
+        case .claude: "claude"
+        case .codex: "codex"
+        case .antigravity: "agy"
+        }
+      let signatures = [configuredExecutable, defaultExecutable]
         .compactMap { $0 }
       return signatures.contains { signature in
         normalizedCommand.range(

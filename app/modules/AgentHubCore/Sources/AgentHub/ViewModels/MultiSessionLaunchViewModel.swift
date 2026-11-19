@@ -3,7 +3,7 @@
 //  AgentHub
 //
 //  View model for the Session Launcher.
-//  Coordinates creating worktrees and starting sessions for Claude, Codex, or both.
+//  Coordinates creating worktrees and starting sessions for Claude, Codex, Antigravity, or several at once.
 //
 
 import AppKit
@@ -71,6 +71,15 @@ public enum SmartPhase: Equatable {
 public enum SmartProvider: String, CaseIterable, Sendable {
   case claude = "Claude"
   case codex = "Codex"
+  case antigravity = "Antigravity"
+
+  var sessionProviderKind: SessionProviderKind {
+    switch self {
+    case .claude: .claude
+    case .codex: .codex
+    case .antigravity: .antigravity
+    }
+  }
 }
 
 // MARK: - AttachedFile
@@ -123,6 +132,7 @@ public final class MultiSessionLaunchViewModel {
 
   private let claudeViewModel: CLISessionsViewModel
   private let codexViewModel: CLISessionsViewModel
+  private let antigravityViewModel: CLISessionsViewModel?
   private let worktreeService: GitWorktreeService
   private let intelligenceViewModel: IntelligenceViewModel?
   private let worktreeBranchNamingService: (any WorktreeBranchNamingServiceProtocol)?
@@ -151,11 +161,13 @@ public final class MultiSessionLaunchViewModel {
   public var claudeUseWorktree: Bool = false
   public var claudeWorktreeName: String = ""
   public var isCodexSelected: Bool = false
+  public var isAntigravitySelected: Bool = false
   public var isPlanModeEnabled: Bool = false
   public var sharedPrompt: String = ""
   public var attachedFiles: [AttachedFile] = []
   public var claudeBranchName: String = ""
   public var codexBranchName: String = ""
+  public var antigravityBranchName: String = ""
   public var singleBranchName: String = ""
   public var manualSingleBranchName: String = ""
   public var manualSingleDirectoryName: String = ""
@@ -163,6 +175,8 @@ public final class MultiSessionLaunchViewModel {
   public var manualClaudeDirectoryName: String = ""
   public var manualCodexBranchName: String = ""
   public var manualCodexDirectoryName: String = ""
+  public var manualAntigravityBranchName: String = ""
+  public var manualAntigravityDirectoryName: String = ""
   public var baseBranch: RemoteBranch?
   public var selectedRepository: SelectedRepository? {
     didSet {
@@ -187,6 +201,7 @@ public final class MultiSessionLaunchViewModel {
   public var isLaunching: Bool = false
   public var claudeProgress: WorktreeCreationProgress = .idle
   public var codexProgress: WorktreeCreationProgress = .idle
+  public var antigravityProgress: WorktreeCreationProgress = .idle
   public var branchNamingProgress: WorktreeBranchNamingProgress = .idle
   public var branchNamingStartedAt: Date?
   public var branchNamingCompletedAt: Date?
@@ -234,11 +249,12 @@ public final class MultiSessionLaunchViewModel {
     var providers: [SessionProviderKind] = []
     if isClaudeSelected { providers.append(.claude) }
     if isCodexSelected { providers.append(.codex) }
+    if isAntigravitySelected { providers.append(.antigravity) }
     return providers
   }
 
   public var hasAnyProviderSelected: Bool {
-    isClaudeSelected || isCodexSelected
+    isClaudeSelected || isCodexSelected || isAntigravitySelected
   }
 
   public var isSmartModeAvailable: Bool {
@@ -270,6 +286,7 @@ public final class MultiSessionLaunchViewModel {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     worktreeService: GitWorktreeService = GitWorktreeService(),
     intelligenceViewModel: IntelligenceViewModel? = nil,
     worktreeBranchNamingService: (any WorktreeBranchNamingServiceProtocol)? = nil,
@@ -282,6 +299,7 @@ public final class MultiSessionLaunchViewModel {
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.worktreeService = worktreeService
     self.intelligenceViewModel = intelligenceViewModel
     self.worktreeBranchNamingService = worktreeBranchNamingService
@@ -482,6 +500,7 @@ public final class MultiSessionLaunchViewModel {
   @discardableResult
   public func preselectRepository(path: String) -> Bool {
     let combined = claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+      + (antigravityViewModel?.selectedRepositories ?? [])
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
     if let repository = combined.last(where: {
       WorktreeModuleResolver.normalizedDirectoryPath($0.path) == normalizedPath
@@ -545,9 +564,15 @@ public final class MultiSessionLaunchViewModel {
     case .claude:
       claudeMode = .enabled
       isCodexSelected = false
+      isAntigravitySelected = false
     case .codex:
       claudeMode = .disabled
       isCodexSelected = true
+      isAntigravitySelected = false
+    case .antigravity:
+      claudeMode = .disabled
+      isCodexSelected = false
+      isAntigravitySelected = true
     }
 
     let branchName = Self.forkBranchName(for: session)
@@ -720,6 +745,7 @@ public final class MultiSessionLaunchViewModel {
     playedWorktreeSuccessPaths.removeAll()
     applyWorktreeProgress(.idle, to: \.claudeProgress)
     applyWorktreeProgress(.idle, to: \.codexProgress)
+    applyWorktreeProgress(.idle, to: \.antigravityProgress)
     resetBranchNamingProgress()
 
     let trimmedPrompt = sharedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -824,6 +850,19 @@ public final class MultiSessionLaunchViewModel {
             permissionModePlan: isPlanModeEnabled,
             progressKeyPath: \.codexProgress
           )
+        case .antigravity:
+          try await launchSingleProvider(
+            initialPrompt: initialPrompt,
+            initialInputText: initialInputText,
+            contextBlock: contextBlock,
+            repoPath: repoPath,
+            branchName: singleBranchName,
+            viewModel: antigravityViewModel ?? claudeViewModel,
+            providerKind: .antigravity,
+            providerLabel: SessionProviderKind.antigravity.rawValue,
+            permissionModePlan: isPlanModeEnabled,
+            progressKeyPath: \.antigravityProgress
+          )
         }
       }
     }
@@ -926,9 +965,10 @@ public final class MultiSessionLaunchViewModel {
       playedWorktreeSuccessPaths.removeAll()
       applyWorktreeProgress(.idle, to: \.claudeProgress)
       applyWorktreeProgress(.idle, to: \.codexProgress)
+      applyWorktreeProgress(.idle, to: \.antigravityProgress)
       resetBranchNamingProgress()
 
-      let viewModel = smartProvider == .claude ? claudeViewModel : codexViewModel
+      let viewModel = self.viewModel(for: smartProvider.sessionProviderKind)
       let repoPath = repo.path
       let dangerously = smartProvider == .claude ? claudeMode.dangerouslySkipPermissions : false
 
@@ -1051,7 +1091,7 @@ public final class MultiSessionLaunchViewModel {
       for: repository,
       launchContext: .smartFallback,
       promptText: initialPrompt,
-      providerKinds: [smartProvider == .claude ? .claude : .codex]
+      providerKinds: [smartProvider.sessionProviderKind]
     )
 
     guard let branchName = namingResult.single else {
@@ -1125,6 +1165,7 @@ public final class MultiSessionLaunchViewModel {
     sharedPrompt = ""
     claudeBranchName = ""
     codexBranchName = ""
+    antigravityBranchName = ""
     singleBranchName = ""
     baseBranch = nil
     selectedRepository = nil
@@ -1145,11 +1186,15 @@ public final class MultiSessionLaunchViewModel {
     manualClaudeDirectoryName = ""
     manualCodexBranchName = ""
     manualCodexDirectoryName = ""
+    manualAntigravityBranchName = ""
+    manualAntigravityDirectoryName = ""
     isCodexSelected = false
+    isAntigravitySelected = false
     isPlanModeEnabled = false
     playedWorktreeSuccessPaths.removeAll()
     claudeProgress = .idle
     codexProgress = .idle
+    antigravityProgress = .idle
     resetBranchNamingProgress()
     isLaunching = false
     launchError = nil
@@ -1173,8 +1218,7 @@ public final class MultiSessionLaunchViewModel {
     let providers = selectedProviders
 
     for provider in providers {
-      let viewModel = provider == .claude ? claudeViewModel : codexViewModel
-      viewModel.addRepository(at: repoPath)
+      viewModel(for: provider).addRepository(at: repoPath)
     }
 
     try await Task.sleep(for: .milliseconds(300))
@@ -1220,8 +1264,24 @@ public final class MultiSessionLaunchViewModel {
       )
     }
 
+    if providers.contains(.antigravity), let antigravityViewModel {
+      try await Task.sleep(for: .milliseconds(500))
+      try Task.checkCancellation()
+      antigravityViewModel.refresh()
+      try await Task.sleep(for: .milliseconds(300))
+      try Task.checkCancellation()
+      antigravityViewModel.startNewSessionInHub(
+        worktree,
+        initialPrompt: initialPrompt,
+        initialInputText: initialInputText,
+        contextBlock: contextBlock,
+        permissionModePlan: isPlanModeEnabled
+      )
+    }
+
     claudeViewModel.refresh()
     codexViewModel.refresh()
+    antigravityViewModel?.refresh()
   }
 
   private func launchBothProviders(
@@ -1230,58 +1290,89 @@ public final class MultiSessionLaunchViewModel {
     contextBlock: String?,
     repoPath: String
   ) async throws {
-    // Ensure the repository is added to both providers
-    claudeViewModel.addRepository(at: repoPath)
-    codexViewModel.addRepository(at: repoPath)
+    let providers = selectedProviders
+    // Ensure the repository is added to every selected provider
+    for provider in providers {
+      viewModel(for: provider).addRepository(at: repoPath)
+    }
     try await Task.sleep(for: .milliseconds(300))
     try Task.checkCancellation()
 
     // 1. Create Claude worktree
     var claudeWorktreePath: String?
-    do {
-      let dirName = directoryNameForLaunch(branchName: claudeBranchName, provider: .claude)
-      claudeWorktreePath = try await createWorktreeForLaunch(
-        providerLabel: SessionProviderKind.claude.rawValue,
-        repoPath: repoPath,
-        branchName: claudeBranchName,
-        directoryName: dirName,
-        startPoint: baseBranch?.gitStartPoint,
-        progressKeyPath: \.claudeProgress
-      )
-    } catch is CancellationError {
-      throw CancellationError()
-    } catch {
-      applyWorktreeProgress(.failed(error: error.localizedDescription), to: \.claudeProgress)
-      launchError = "Claude worktree: \(error.localizedDescription)"
+    if providers.contains(.claude) {
+      do {
+        let dirName = directoryNameForLaunch(branchName: claudeBranchName, provider: .claude)
+        claudeWorktreePath = try await createWorktreeForLaunch(
+          providerLabel: SessionProviderKind.claude.rawValue,
+          repoPath: repoPath,
+          branchName: claudeBranchName,
+          directoryName: dirName,
+          startPoint: baseBranch?.gitStartPoint,
+          progressKeyPath: \.claudeProgress
+        )
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        applyWorktreeProgress(.failed(error: error.localizedDescription), to: \.claudeProgress)
+        launchError = "Claude worktree: \(error.localizedDescription)"
+      }
     }
 
     try Task.checkCancellation()
 
     // 2. Create Codex worktree
     var codexWorktreePath: String?
-    do {
-      let dirName = directoryNameForLaunch(branchName: codexBranchName, provider: .codex)
-      codexWorktreePath = try await createWorktreeForLaunch(
-        providerLabel: SessionProviderKind.codex.rawValue,
-        repoPath: repoPath,
-        branchName: codexBranchName,
-        directoryName: dirName,
-        startPoint: baseBranch?.gitStartPoint,
-        progressKeyPath: \.codexProgress
-      )
-    } catch is CancellationError {
-      throw CancellationError()
-    } catch {
-      applyWorktreeProgress(.failed(error: error.localizedDescription), to: \.codexProgress)
-      let msg = "Codex worktree: \(error.localizedDescription)"
-      launchError = launchError != nil ? "\(launchError!)\n\(msg)" : msg
+    if providers.contains(.codex) {
+      do {
+        let dirName = directoryNameForLaunch(branchName: codexBranchName, provider: .codex)
+        codexWorktreePath = try await createWorktreeForLaunch(
+          providerLabel: SessionProviderKind.codex.rawValue,
+          repoPath: repoPath,
+          branchName: codexBranchName,
+          directoryName: dirName,
+          startPoint: baseBranch?.gitStartPoint,
+          progressKeyPath: \.codexProgress
+        )
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        applyWorktreeProgress(.failed(error: error.localizedDescription), to: \.codexProgress)
+        let msg = "Codex worktree: \(error.localizedDescription)"
+        launchError = launchError != nil ? "\(launchError!)\n\(msg)" : msg
+      }
     }
 
-    guard claudeWorktreePath != nil || codexWorktreePath != nil else { return }
+    try Task.checkCancellation()
+
+    // 2b. Create Antigravity worktree
+    var antigravityWorktreePath: String?
+    if providers.contains(.antigravity), antigravityViewModel != nil {
+      do {
+        let dirName = directoryNameForLaunch(branchName: antigravityBranchName, provider: .antigravity)
+        antigravityWorktreePath = try await createWorktreeForLaunch(
+          providerLabel: SessionProviderKind.antigravity.rawValue,
+          repoPath: repoPath,
+          branchName: antigravityBranchName,
+          directoryName: dirName,
+          startPoint: baseBranch?.gitStartPoint,
+          progressKeyPath: \.antigravityProgress
+        )
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        applyWorktreeProgress(.failed(error: error.localizedDescription), to: \.antigravityProgress)
+        let msg = "Antigravity worktree: \(error.localizedDescription)"
+        launchError = launchError != nil ? "\(launchError!)\n\(msg)" : msg
+      }
+    }
+
+    guard claudeWorktreePath != nil || codexWorktreePath != nil || antigravityWorktreePath != nil else { return }
 
     // 3. Refresh and start sessions
     claudeViewModel.refresh()
     codexViewModel.refresh()
+    antigravityViewModel?.refresh()
     try await Task.sleep(for: .milliseconds(500))
     try Task.checkCancellation()
 
@@ -1319,8 +1410,34 @@ public final class MultiSessionLaunchViewModel {
       )
     }
 
+    if let path = antigravityWorktreePath, let antigravityViewModel {
+      try await Task.sleep(for: .milliseconds(800))
+      try Task.checkCancellation()
+      let worktree = await antigravityViewModel.registerCreatedWorktree(
+        name: antigravityBranchName,
+        path: path,
+        parentRepositoryPath: repoPath
+      )
+      antigravityViewModel.startNewSessionInHub(
+        worktree,
+        initialPrompt: initialPrompt,
+        initialInputText: initialInputText,
+        contextBlock: contextBlock,
+        permissionModePlan: isPlanModeEnabled
+      )
+    }
+
     claudeViewModel.refresh()
     codexViewModel.refresh()
+    antigravityViewModel?.refresh()
+  }
+
+  private func viewModel(for provider: SessionProviderKind) -> CLISessionsViewModel {
+    switch provider {
+    case .claude: claudeViewModel
+    case .codex: codexViewModel
+    case .antigravity: antigravityViewModel ?? claudeViewModel
+    }
   }
 
   private func launchSingleProvider(
@@ -1459,11 +1576,13 @@ public final class MultiSessionLaunchViewModel {
     singleBranchName = result.single ?? ""
     claudeBranchName = result.claude ?? ""
     codexBranchName = result.codex ?? ""
+    antigravityBranchName = result.antigravity ?? ""
     let resolvedSingle = singleBranchName
     let resolvedClaude = claudeBranchName
     let resolvedCodex = codexBranchName
+    let resolvedAntigravity = antigravityBranchName
     AppLogger.intelligence.info(
-      "\(Self.aiWorktreeLogPrefix, privacy: .public) Applied resolved branch names single=\(resolvedSingle, privacy: .public) claude=\(resolvedClaude, privacy: .public) codex=\(resolvedCodex, privacy: .public)"
+      "\(Self.aiWorktreeLogPrefix, privacy: .public) Applied resolved branch names single=\(resolvedSingle, privacy: .public) claude=\(resolvedClaude, privacy: .public) codex=\(resolvedCodex, privacy: .public) antigravity=\(resolvedAntigravity, privacy: .public)"
     )
   }
 
@@ -1474,28 +1593,32 @@ public final class MultiSessionLaunchViewModel {
       singleBranchName = ""
       claudeBranchName = manualNames(for: .claude, providerCount: providers.count)?.branchName ?? ""
       codexBranchName = manualNames(for: .codex, providerCount: providers.count)?.branchName ?? ""
+      antigravityBranchName = manualNames(for: .antigravity, providerCount: providers.count)?.branchName ?? ""
     } else if let provider = providers.first,
               let names = manualNames(for: provider, providerCount: providers.count) {
       singleBranchName = names.branchName
       claudeBranchName = ""
       codexBranchName = ""
+      antigravityBranchName = ""
     }
 
     resetBranchNamingProgress()
     let appliedSingle = singleBranchName
     let appliedClaude = claudeBranchName
     let appliedCodex = codexBranchName
+    let appliedAntigravity = antigravityBranchName
     AppLogger.intelligence.info(
-      "\(Self.aiWorktreeLogPrefix, privacy: .public) Applied manual worktree names single=\(appliedSingle, privacy: .public) claude=\(appliedClaude, privacy: .public) codex=\(appliedCodex, privacy: .public)"
+      "\(Self.aiWorktreeLogPrefix, privacy: .public) Applied manual worktree names single=\(appliedSingle, privacy: .public) claude=\(appliedClaude, privacy: .public) codex=\(appliedCodex, privacy: .public) antigravity=\(appliedAntigravity, privacy: .public)"
     )
     return true
   }
 
   private func validateResolvedBranchNames(for providers: [SessionProviderKind]) -> Bool {
     if providers.count > 1 {
-      return (!claudeBranchName.isEmpty || !codexBranchName.isEmpty)
+      return (!claudeBranchName.isEmpty || !codexBranchName.isEmpty || !antigravityBranchName.isEmpty)
         && (!providers.contains(.claude) || !claudeBranchName.isEmpty)
         && (!providers.contains(.codex) || !codexBranchName.isEmpty)
+        && (!providers.contains(.antigravity) || !antigravityBranchName.isEmpty)
     }
     return !singleBranchName.isEmpty
   }
@@ -1520,6 +1643,9 @@ public final class MultiSessionLaunchViewModel {
       case .codex:
         branchName = Self.trimmed(manualCodexBranchName)
         directoryName = Self.trimmed(manualCodexDirectoryName)
+      case .antigravity:
+        branchName = Self.trimmed(manualAntigravityBranchName)
+        directoryName = Self.trimmed(manualAntigravityDirectoryName)
       }
     } else {
       branchName = Self.trimmed(manualSingleBranchName)
@@ -1587,7 +1713,7 @@ public final class MultiSessionLaunchViewModel {
   }
 
   private func finalizeBranchNamingProgress(with result: WorktreeBranchNamingResult) {
-    let resolvedBranchNames = [result.single, result.claude, result.codex].compactMap { $0 }
+    let resolvedBranchNames = [result.single, result.claude, result.codex, result.antigravity].compactMap { $0 }
     if case .completed(_, let source, let branchNames) = branchNamingProgress,
        source == result.source,
        branchNames == resolvedBranchNames {
@@ -1626,6 +1752,7 @@ public final class MultiSessionLaunchViewModel {
     singleBranchName = ""
     claudeBranchName = ""
     codexBranchName = ""
+    antigravityBranchName = ""
     activeWorktreeOperations.removeAll()
 
     if branchNamingProgress.isInProgress {
@@ -1642,6 +1769,12 @@ public final class MultiSessionLaunchViewModel {
       codexProgress = .cancelled(message: "Worktree creation cancelled")
     } else if case .updatingFiles = codexProgress {
       codexProgress = .cancelled(message: "Worktree creation cancelled")
+    }
+
+    if case .preparing = antigravityProgress {
+      antigravityProgress = .cancelled(message: "Worktree creation cancelled")
+    } else if case .updatingFiles = antigravityProgress {
+      antigravityProgress = .cancelled(message: "Worktree creation cancelled")
     }
 
     switch smartPhase {

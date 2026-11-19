@@ -7,13 +7,16 @@ import Foundation
 struct ProviderScopedPinnedSessions: Equatable, Sendable {
   let claudeSessionIds: Set<String>
   let codexSessionIds: Set<String>
+  let antigravitySessionIds: Set<String>
 
   init(
     claudeSessionIds: Set<String> = [],
-    codexSessionIds: Set<String> = []
+    codexSessionIds: Set<String> = [],
+    antigravitySessionIds: Set<String> = []
   ) {
     self.claudeSessionIds = claudeSessionIds
     self.codexSessionIds = codexSessionIds
+    self.antigravitySessionIds = antigravitySessionIds
   }
 
   func contains(sessionId: String, providerKind: SessionProviderKind) -> Bool {
@@ -22,6 +25,8 @@ struct ProviderScopedPinnedSessions: Equatable, Sendable {
       return claudeSessionIds.contains(sessionId)
     case .codex:
       return codexSessionIds.contains(sessionId)
+    case .antigravity:
+      return antigravitySessionIds.contains(sessionId)
     }
   }
 }

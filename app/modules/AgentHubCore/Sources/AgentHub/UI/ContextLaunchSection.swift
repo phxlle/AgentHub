@@ -126,7 +126,15 @@ struct ContextLaunchSection: View {
   /// The configured default model for the selected provider, so the builder's
   /// window percentage reflects that model's real context window.
   private var configuredModelIdentifier: String? {
-    let provider = viewModel.isCodexSelected && !viewModel.isClaudeSelected ? "codex" : "claude"
+    // Antigravity has no AI config, so an Antigravity-only launch has no configured model.
+    let provider: String
+    if viewModel.isClaudeSelected {
+      provider = "claude"
+    } else if viewModel.isCodexSelected {
+      provider = "codex"
+    } else {
+      return nil
+    }
     let model = agentHub?.metadataStore?.getAIConfigSync(for: provider)?.defaultModel
     return (model?.isEmpty == false) ? model : nil
   }

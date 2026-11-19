@@ -15,6 +15,8 @@ public extension SessionProviderKind {
       self = .claude
     case .codex:
       self = .codex
+    case .antigravity:
+      self = .antigravity
     }
   }
 }

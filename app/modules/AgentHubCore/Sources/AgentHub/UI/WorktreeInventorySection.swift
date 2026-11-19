@@ -3,6 +3,7 @@ import SwiftUI
 struct WorktreeInventorySection: View {
   let claudeViewModel: CLISessionsViewModel
   let codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
 
   @State private var inventoryViewModel: WorktreeInventoryViewModel
   @State private var pendingDeletion: WorktreeSettingsWorktree?
@@ -14,11 +15,13 @@ struct WorktreeInventorySection: View {
   init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     inventoryService: any GitWorktreeInventoryServiceProtocol = GitWorktreeService(),
     worktreeRemovalService: any GitWorktreeRemovalServiceProtocol = GitWorktreeService()
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self._inventoryViewModel = State(initialValue: WorktreeInventoryViewModel(
       inventoryService: inventoryService,
       removalService: worktreeRemovalService
@@ -103,7 +106,8 @@ struct WorktreeInventorySection: View {
       await importCoordinator.importInitial(
         worktree,
         claudeViewModel: claudeViewModel,
-        codexViewModel: codexViewModel
+        codexViewModel: codexViewModel,
+        antigravityViewModel: antigravityViewModel
       )
       await reloadInventory()
     }
@@ -114,7 +118,8 @@ struct WorktreeInventorySection: View {
       await importCoordinator.showMore(
         worktree,
         claudeViewModel: claudeViewModel,
-        codexViewModel: codexViewModel
+        codexViewModel: codexViewModel,
+        antigravityViewModel: antigravityViewModel
       )
       await reloadInventory()
     }
@@ -167,10 +172,13 @@ struct WorktreeInventorySection: View {
   private func completeSuccessfulDeletion(of worktree: WorktreeSettingsWorktree) {
     claudeViewModel.archiveMonitoredSessions(inWorktreePath: worktree.path)
     codexViewModel.archiveMonitoredSessions(inWorktreePath: worktree.path)
+    antigravityViewModel?.archiveMonitoredSessions(inWorktreePath: worktree.path)
     claudeViewModel.forgetOwnedWorktreePath(worktree.path)
     codexViewModel.forgetOwnedWorktreePath(worktree.path)
+    antigravityViewModel?.forgetOwnedWorktreePath(worktree.path)
     claudeViewModel.refresh()
     codexViewModel.refresh()
+    antigravityViewModel?.refresh()
   }
 
   private func showFailure(worktree: WorktreeSettingsWorktree) {
@@ -198,7 +206,9 @@ struct WorktreeInventorySection: View {
       claudeRepositories: claudeViewModel.selectedRepositories,
       codexRepositories: codexViewModel.selectedRepositories,
       claudeMonitoredSessions: claudeViewModel.monitoredSessions.map(\.session),
-      codexMonitoredSessions: codexViewModel.monitoredSessions.map(\.session)
+      codexMonitoredSessions: codexViewModel.monitoredSessions.map(\.session),
+      antigravityRepositories: antigravityViewModel?.selectedRepositories ?? [],
+      antigravityMonitoredSessions: antigravityViewModel?.monitoredSessions.map(\.session) ?? []
     )
   }
 
@@ -206,8 +216,10 @@ struct WorktreeInventorySection: View {
     [
       repositoriesSignature(claudeViewModel.selectedRepositories),
       repositoriesSignature(codexViewModel.selectedRepositories),
+      repositoriesSignature(antigravityViewModel?.selectedRepositories ?? []),
       sessionsSignature(claudeViewModel.monitoredSessions.map(\.session)),
       sessionsSignature(codexViewModel.monitoredSessions.map(\.session)),
+      sessionsSignature(antigravityViewModel?.monitoredSessions.map(\.session) ?? []),
     ].joined(separator: "|")
   }
 

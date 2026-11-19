@@ -1,6 +1,6 @@
 # AgentHub
 
-Native macOS app for monitoring and managing Claude Code and Codex CLI sessions in real-time. Entirely local — no data leaves the machine.
+Native macOS app for monitoring and managing Claude Code, Codex and Antigravity (`agy`) CLI sessions in real-time. Entirely local — no data leaves the machine.
 
 ## Tech Stack
 
@@ -40,6 +40,7 @@ app/
 ```
 ~/.claude/projects/{encoded-path}/{sessionId}.jsonl   (Claude sessions)
 ~/.codex/sessions/{date-path}/                        (Codex sessions)
+~/.gemini/antigravity-cli/brain/{id}/.system_generated/logs/transcript.jsonl  (Antigravity conversations)
     → SessionFileWatcher (kqueue DispatchSource, byte-offset incremental reads)
     → SessionJSONLParser (parses JSONL lines into structured state)
     → SessionMonitorState (published via Combine)
@@ -49,13 +50,15 @@ app/
 
 ### Provider Abstraction
 
-Both Claude and Codex are supported through shared protocols:
+Claude, Codex and Antigravity are supported through shared protocols:
 
 - `SessionMonitorServiceProtocol` — session discovery and repository management
 - `SessionFileWatcherProtocol` — real-time file monitoring with state publishing
 - `SessionSearchServiceProtocol` — full-text search across sessions
 
-Concrete implementations: `CLISessionMonitorService` / `CodexSessionMonitorService`, `SessionFileWatcher` / `CodexSessionFileWatcher`.
+Concrete implementations: `CLISessionMonitorService` / `CodexSessionMonitorService` / `AntigravitySessionMonitorService`, `SessionFileWatcher` / `CodexSessionFileWatcher` / `AntigravitySessionFileWatcher`.
+
+Antigravity (`agy`) writes one JSONL step per line to the transcript above while it runs; the conversation's workspace lives in `~/.gemini/antigravity-cli/conversation_summaries.db` (SQLite, read via `AntigravityConversationSummaryIndex`). Known gaps: no per-session MCP injection (agy only reads the global `~/.gemini/config/mcp_config.json`, so the bundled `agenthub` tools are not available in agy sessions), no system-prompt flag, and "awaiting approval" is a timeout heuristic (agy hooks could replace it).
 
 ### Environment Injection
 
@@ -372,6 +375,7 @@ xcodebuild -workspace app/AgentHub.xcodeproj/project.xcworkspace -scheme AgentHu
 - Claude stats: `~/.claude/stats-cache.json`
 - Codex sessions: `~/.codex/sessions/{date-path}/`
 - Codex history: `~/.codex/history.jsonl`
+- Antigravity conversations: `~/.gemini/antigravity-cli/brain/{conversationId}/.system_generated/logs/transcript.jsonl`, workspace index `~/.gemini/antigravity-cli/conversation_summaries.db`
 - Custom themes: `~/Library/Application Support/AgentHub/Themes/`
 - Approval hook script: `~/Library/Application Support/AgentHub/hooks/agenthub-approval.sh`
 - Approval sidecars: `~/Library/Application Support/AgentHub/approvals/{sessionId}.jsonl`
@@ -380,7 +384,7 @@ xcodebuild -workspace app/AgentHub.xcodeproj/project.xcworkspace -scheme AgentHu
 
 ## Approval Detection (Claude only)
 
-Claude Code buffers `tool_use` blocks until the turn commits, so JSONL alone can't surface pending approvals during the prompt. Hook events write to a sidecar directory we watch: `PermissionRequest` marks real approval prompts, while `PreToolUse` records observed tool/mode state so `auto` mode changes can suppress false pending approvals mid-session. JSONL stays primary and the hook fills the gap. Codex has no equivalent mechanism — `CodexSessionFileWatcher` hardcodes `pendingToolUse: nil`.
+Claude Code buffers `tool_use` blocks until the turn commits, so JSONL alone can't surface pending approvals during the prompt. Hook events write to a sidecar directory we watch: `PermissionRequest` marks real approval prompts, while `PreToolUse` records observed tool/mode state so `auto` mode changes can suppress false pending approvals mid-session. JSONL stays primary and the hook fills the gap. Codex has no equivalent mechanism — `CodexSessionFileWatcher` hardcodes `pendingToolUse: nil`. Antigravity likewise; `AntigravitySessionJSONLParser` infers approval from a tool call that stays open past the approval timeout.
 
 - `ClaudeHookInstaller` — writes our hook entry into `{project}/.claude/settings.local.json`. Driven by the repositories subscription (Claude Code reads settings once at session start). Preserves every other key and every non-AgentHub hook entry.
 - `ClaudeHookSidecarWatcher` — per-session kqueue watcher over `approvals/`, merges into `ParseResult.pendingToolUses` at `buildMonitorState`.

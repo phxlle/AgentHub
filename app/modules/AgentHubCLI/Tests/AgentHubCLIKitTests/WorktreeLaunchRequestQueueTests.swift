@@ -106,6 +106,8 @@ struct WorktreeLaunchRequestQueueTests {
     #expect(WorktreeLaunchProvider(commandLineValue: "claude") == .claude)
     #expect(WorktreeLaunchProvider(commandLineValue: "Claude") == .claude)
     #expect(WorktreeLaunchProvider(commandLineValue: "codex") == .codex)
+    #expect(WorktreeLaunchProvider(commandLineValue: "antigravity") == .antigravity)
+    #expect(WorktreeLaunchProvider(commandLineValue: "agy") == .antigravity)
     #expect(WorktreeLaunchProvider(commandLineValue: "unknown") == nil)
   }
 }

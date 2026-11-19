@@ -75,6 +75,18 @@ public enum AgentHubDefaults {
   /// Type: String (default: "codex")
   public static let codexCommand = "\(keyPrefix)cli.codexCommand"
 
+  /// Custom Antigravity CLI command name
+  /// Type: String (default: "agy")
+  public static let antigravityCommand = "\(keyPrefix)cli.antigravityCommand"
+
+  /// Whether Antigravity command was set by developer (not user-editable)
+  /// Type: Bool (default: false)
+  public static let antigravityCommandLockedByDeveloper = "\(keyPrefix)cli.antigravityCommandLocked"
+
+  /// Extra CLI arguments applied to Antigravity command invocations
+  /// Type: String (shell-style arguments, default: "")
+  public static let antigravityCommandArgs = "\(keyPrefix)cli.antigravityCommandArgs"
+
   /// Whether Claude command was set by developer (not user-editable)
   /// Type: Bool (default: false)
   public static let claudeCommandLockedByDeveloper = "\(keyPrefix)cli.claudeCommandLocked"

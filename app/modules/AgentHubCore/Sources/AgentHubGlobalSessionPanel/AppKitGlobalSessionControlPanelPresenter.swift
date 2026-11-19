@@ -122,6 +122,7 @@ public final class AppKitGlobalSessionControlPanelPresenter: GlobalSessionContro
     let content = GlobalSessionControlPanelView(
       claudeViewModel: provider.claudeSessionsViewModel,
       codexViewModel: provider.codexSessionsViewModel,
+      antigravityViewModel: provider.antigravitySessionsViewModel,
       selectionRouter: provider.globalSessionSelectionRouter,
       displayModeToggleRelay: displayModeToggleRelay,
       defaults: defaults,

@@ -83,6 +83,11 @@ struct GitHubIssueDetailView: View {
           } label: {
             Label("Codex", systemImage: "c.square")
           }
+          Button {
+            onStartNewSession("fix \(issue.url)", .antigravity)
+          } label: {
+            Label("Antigravity", systemImage: "sparkles")
+          }
         } label: {
           HStack(spacing: 3) {
             Image(systemName: "wrench")

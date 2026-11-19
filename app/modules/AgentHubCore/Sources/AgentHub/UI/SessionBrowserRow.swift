@@ -86,13 +86,21 @@ struct SessionBrowserRow: View {
 
   // MARK: - Subviews
 
+  private var providerIconName: String {
+    switch providerKind {
+    case .claude: return "brain.head.profile"
+    case .codex: return "cube"
+    case .antigravity: return "sparkles"
+    }
+  }
+
   private var providerIcon: some View {
     ZStack {
       Circle()
         .fill(Color.brandPrimary(for: providerKind).opacity(0.15))
         .frame(width: 28, height: 28)
 
-      Image(systemName: providerKind == .claude ? "brain.head.profile" : "cube")
+      Image(systemName: providerIconName)
         .font(.system(size: 12))
         .foregroundColor(.brandPrimary(for: providerKind))
     }

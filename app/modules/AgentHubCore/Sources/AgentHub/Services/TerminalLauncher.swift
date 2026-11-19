@@ -453,6 +453,18 @@ public struct TerminalLauncher {
     return findExecutable(command: command, additionalPaths: additionalPaths)
   }
 
+  /// Finds the Antigravity CLI (`agy`). The installer puts it in ~/.local/bin.
+  public static func findAntigravityExecutable(
+    command: String = "agy",
+    additionalPaths: [String]?
+  ) -> String? {
+    let localPath = "\(NSHomeDirectory())/.local/bin/\(command)"
+    if FileManager.default.fileExists(atPath: localPath) {
+      return localPath
+    }
+    return findExecutable(command: command, additionalPaths: additionalPaths)
+  }
+
   /// Finds the full path to a CLI executable
   /// - Parameters:
   ///   - command: The command name to search for (e.g., "claude", "codex")

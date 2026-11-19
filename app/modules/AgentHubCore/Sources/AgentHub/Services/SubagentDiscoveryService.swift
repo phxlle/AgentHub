@@ -50,6 +50,7 @@ public actor SubagentDiscoveryService: SubagentDiscoveryServiceProtocol {
     switch provider {
     case .claude: found = claudeSubagents(for: session)
     case .codex: found = codexSubagents(for: session)
+    case .antigravity: found = []
     }
     return found.sorted { ($0.startedAt ?? .distantPast) > ($1.startedAt ?? .distantPast) }
   }

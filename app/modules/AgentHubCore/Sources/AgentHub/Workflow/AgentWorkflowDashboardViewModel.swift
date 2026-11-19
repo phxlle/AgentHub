@@ -19,6 +19,7 @@ public final class AgentWorkflowDashboardViewModel {
   private let runtime: (any AgentWorkflowRuntimeProtocol)?
   private let claudeSessionsViewModel: CLISessionsViewModel?
   private let codexSessionsViewModel: CLISessionsViewModel?
+  private let antigravitySessionsViewModel: CLISessionsViewModel?
   private let gitHubService: (any GitHubCLIServiceProtocol)?
   private let sessionInventoryLoader: (() -> Void)?
   private let sessionObservationSource: (() -> [AgentSessionObservation])?
@@ -94,16 +95,19 @@ public final class AgentWorkflowDashboardViewModel {
     startupError: String? = nil,
     claudeSessionsViewModel: CLISessionsViewModel? = nil,
     codexSessionsViewModel: CLISessionsViewModel? = nil,
+    antigravitySessionsViewModel: CLISessionsViewModel? = nil,
     gitHubService: (any GitHubCLIServiceProtocol)? = nil,
     userDefaults: UserDefaults = .standard
   ) {
     self.runtime = runtime
     self.claudeSessionsViewModel = claudeSessionsViewModel
     self.codexSessionsViewModel = codexSessionsViewModel
+    self.antigravitySessionsViewModel = antigravitySessionsViewModel
     self.gitHubService = gitHubService
     sessionInventoryLoader = {
       claudeSessionsViewModel?.ensureBrowseSessionsLoaded()
       codexSessionsViewModel?.ensureBrowseSessionsLoaded()
+      antigravitySessionsViewModel?.ensureBrowseSessionsLoaded()
     }
     sessionObservationSource = nil
     reviewAutomationHooks = nil
@@ -125,6 +129,7 @@ public final class AgentWorkflowDashboardViewModel {
     self.runtime = runtime
     claudeSessionsViewModel = nil
     codexSessionsViewModel = nil
+    antigravitySessionsViewModel = nil
     self.gitHubService = gitHubService
     self.sessionInventoryLoader = sessionInventoryLoader
     self.sessionObservationSource = sessionObservationSource
@@ -583,6 +588,9 @@ public final class AgentWorkflowDashboardViewModel {
     case .codex:
       return codexSessionsViewModel?.displayName(for: assignment.session)
         ?? assignment.session.displayName
+    case .antigravity:
+      return antigravitySessionsViewModel?.displayName(for: assignment.session)
+        ?? assignment.session.displayName
     }
   }
 
@@ -806,6 +814,7 @@ public final class AgentWorkflowDashboardViewModel {
       availableObservations =
         observations(from: claudeSessionsViewModel, provider: .claude)
         + observations(from: codexSessionsViewModel, provider: .codex)
+        + observations(from: antigravitySessionsViewModel, provider: .antigravity)
     }
     return availableObservations.filter {
       !manualState.dismissedSessionIDs.contains(observationID($0))
@@ -1106,6 +1115,7 @@ public final class AgentWorkflowDashboardViewModel {
     implementer: DetectedAgentSession
   ) -> Bool {
     guard manualState.automatedReviews[branch.id] == nil else { return false }
+    // Cross-provider review: Codex work is reviewed by Claude, everything else by Codex.
     let reviewerProvider: SessionProviderKind =
       implementer.provider == .codex ? .claude : .codex
     let baselineSessionIDs = Set(
@@ -1181,7 +1191,11 @@ public final class AgentWorkflowDashboardViewModel {
   private func sessionsViewModel(
     for provider: SessionProviderKind
   ) -> CLISessionsViewModel? {
-    provider == .claude ? claudeSessionsViewModel : codexSessionsViewModel
+    switch provider {
+    case .claude: claudeSessionsViewModel
+    case .codex: codexSessionsViewModel
+    case .antigravity: antigravitySessionsViewModel
+    }
   }
 
   private func status(for assignment: DetectedAgentSession) -> SessionStatus? {

@@ -185,6 +185,7 @@ private struct JiraPickUpCard: View {
       HStack(spacing: DesignTokens.Spacing.sm) {
         providerButton(.claude, title: "Claude")
         providerButton(.codex, title: "Codex")
+        providerButton(.antigravity, title: "Antigravity")
       }
       if repositoryPath == nil {
         Text("Choose the repository the agent should work in.")

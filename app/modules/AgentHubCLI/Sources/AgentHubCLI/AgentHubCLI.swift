@@ -73,7 +73,7 @@ struct PlanCommand: AsyncParsableCommand {
     }
 
     for assignment in plan.assignments {
-      let agent = assignment.assignedProvider?.harnessName ?? "your choice (Claude Code or Codex)"
+      let agent = assignment.assignedProvider?.harnessName ?? "your choice (Claude Code, Codex or Antigravity)"
       Swift.print("\n[\(assignment.subtask.id)] \(assignment.subtask.title)")
       Swift.print("  harness: \(agent)")
       if !assignment.matchedCapabilities.isEmpty {
@@ -167,7 +167,7 @@ struct CreateWorktree: AsyncParsableCommand {
   @Flag(name: .long, help: "Request AgentHub to launch an embedded session in the worktree.")
   var launchSession = false
 
-  @Option(name: .long, help: "Provider for the launched session: claude or codex. Defaults to AGENTHUB_PROVIDER.")
+  @Option(name: .long, help: "Provider for the launched session: claude, codex or antigravity. Defaults to AGENTHUB_PROVIDER.")
   var provider: String?
 
   @Option(name: .long, help: "Prompt for the launched session. Required with --launch-session.")
@@ -243,7 +243,7 @@ struct CheckoutWorktree: AsyncParsableCommand {
   @Flag(name: .long, help: "Request AgentHub to launch an embedded session in the worktree.")
   var launchSession = false
 
-  @Option(name: .long, help: "Provider for the launched session: claude or codex. Defaults to AGENTHUB_PROVIDER.")
+  @Option(name: .long, help: "Provider for the launched session: claude, codex or antigravity. Defaults to AGENTHUB_PROVIDER.")
   var provider: String?
 
   @Option(name: .long, help: "Prompt for the launched session. Required with --launch-session.")
@@ -424,7 +424,7 @@ private func resolveLaunchProvider(_ providerOption: String?) throws -> Worktree
   }
 
   if let providerOption, !providerOption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-    throw ValidationError("Invalid provider '\(providerOption)'. Expected claude or codex.")
+    throw ValidationError("Invalid provider '\(providerOption)'. Expected claude, codex or antigravity.")
   }
 
   if let environmentProvider = ProcessInfo.processInfo.environment["AGENTHUB_PROVIDER"]

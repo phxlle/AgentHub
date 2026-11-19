@@ -210,7 +210,7 @@ struct AgentHubMCPServer {
       .flatMap(WorktreeLaunchProvider.init(commandLineValue:))
     else {
       throw MCPError.invalidRequest(
-        "agenthub_name_session is only available inside an AgentHub-managed Claude or Codex session."
+        "agenthub_name_session is only available inside an AgentHub-managed Claude, Codex or Antigravity session."
       )
     }
 
@@ -249,7 +249,7 @@ struct AgentHubMCPServer {
       .flatMap(WorktreeLaunchProvider.init(commandLineValue:))
     else {
       throw MCPError.invalidRequest(
-        "agenthub_record_measurement is only available inside an AgentHub-managed Claude or Codex session."
+        "agenthub_record_measurement is only available inside an AgentHub-managed Claude, Codex or Antigravity session."
       )
     }
 
@@ -673,7 +673,7 @@ struct AgentHubMCPServer {
       .flatMap(WorktreeLaunchProvider.init(commandLineValue:))
     else {
       throw MCPError.invalidRequest(
-        "\(toolName) is only available inside an AgentHub-managed Claude or Codex session."
+        "\(toolName) is only available inside an AgentHub-managed Claude, Codex or Antigravity session."
       )
     }
     return provider
@@ -1095,7 +1095,7 @@ struct AgentHubMCPServer {
   private func planSummary(_ plan: DelegationPlan) -> String {
     var lines = ["Delegation plan: \(plan.assignments.count) subtask(s)."]
     for assignment in plan.assignments {
-      let agent = assignment.assignedProvider?.harnessName ?? "your choice (Claude Code or Codex)"
+      let agent = assignment.assignedProvider?.harnessName ?? "your choice (Claude Code, Codex or Antigravity)"
       lines.append("- [\(assignment.subtask.id)] \(assignment.subtask.title) → \(agent) (branch \(assignment.branchSuggestion))")
     }
     if !plan.notes.isEmpty {
@@ -1187,7 +1187,7 @@ struct AgentHubMCPServer {
   private func resolveProvider(_ explicit: String?) throws -> WorktreeLaunchProvider {
     if let explicit, !explicit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       guard let provider = WorktreeLaunchProvider(commandLineValue: explicit) else {
-        throw MCPError.invalidRequest("Invalid provider '\(explicit)'. Expected claude or codex.")
+        throw MCPError.invalidRequest("Invalid provider '\(explicit)'. Expected claude, codex or antigravity.")
       }
       return provider
     }
@@ -1198,7 +1198,7 @@ struct AgentHubMCPServer {
       return provider
     }
 
-    throw MCPError.invalidRequest("Missing provider. Pass provider as claude/codex or run inside AgentHub.")
+    throw MCPError.invalidRequest("Missing provider. Pass provider as claude/codex/antigravity or run inside AgentHub.")
   }
 
   private func requiredString(_ key: String, in arguments: [String: Any]) throws -> String {
@@ -1306,7 +1306,7 @@ struct AgentHubMCPServer {
           ],
           "provider": [
             "type": "string",
-            "enum": ["claude", "codex"],
+            "enum": ["claude", "codex", "antigravity"],
             "description": "Provider applied to every task unless a task overrides it.",
           ],
           "tasks": [
@@ -1319,7 +1319,7 @@ struct AgentHubMCPServer {
                 "prompt": ["type": "string"],
                 "provider": [
                   "type": "string",
-                  "enum": ["claude", "codex"],
+                  "enum": ["claude", "codex", "antigravity"],
                   "description": "Agent/provider assigned to this task.",
                 ],
                 "from": ["type": "string"],
@@ -1352,7 +1352,7 @@ struct AgentHubMCPServer {
   private func listWorktreesToolSchema() -> [String: Any] {
     [
       "name": "agenthub_list_worktrees",
-      "description": "Lists git worktrees for an AgentHub repository. Resolves the main repository root from the current session cwd or AGENTHUB_PROJECT_PATH and includes Claude/Codex session counts associated with each worktree.",
+      "description": "Lists git worktrees for an AgentHub repository. Resolves the main repository root from the current session cwd or AGENTHUB_PROJECT_PATH and includes Claude/Codex/Antigravity session counts associated with each worktree.",
       "inputSchema": [
         "type": "object",
         "properties": [
@@ -1399,7 +1399,7 @@ struct AgentHubMCPServer {
   private func planningToolSchema() -> [String: Any] {
     [
       "name": "agent_hub_planning",
-      "description": "Builds an advisory plan for AgentHub task delegation. AgentHub launches an agent HARNESS (Claude Code or Codex) — it cannot pick or configure a model — so the plan only ever names the harness, never a model. Decomposition is YOUR job: pass the independent subtasks you inferred; when omitted, the whole prompt is treated as a single task (AgentHub does not statically split). Returns each detected harness's REAL capabilities (its installed skills + configured MCP servers) under `harnessCapabilities`. When one harness is installed it is assigned; when more than one is installed each subtask is SUGGESTED the harness whose skills/MCP tools best match it (see each assignment's `matchedCapabilities`) — confirm or override using that real capability data rather than the harness's general reputation. Advisory only.",
+      "description": "Builds an advisory plan for AgentHub task delegation. AgentHub launches an agent HARNESS (Claude Code, Codex or Antigravity) — it cannot pick or configure a model — so the plan only ever names the harness, never a model. Decomposition is YOUR job: pass the independent subtasks you inferred; when omitted, the whole prompt is treated as a single task (AgentHub does not statically split). Returns each detected harness's REAL capabilities (its installed skills + configured MCP servers) under `harnessCapabilities`. When one harness is installed it is assigned; when more than one is installed each subtask is SUGGESTED the harness whose skills/MCP tools best match it (see each assignment's `matchedCapabilities`) — confirm or override using that real capability data rather than the harness's general reputation. Advisory only.",
       "inputSchema": [
         "type": "object",
         "properties": [
@@ -1580,7 +1580,7 @@ struct AgentHubMCPServer {
         a measurement, or asks what is already being tracked or measured: match their words against \
         the titles, run that measurement's stored query exactly as written, then call \
         agenthub_record_measurement with its id. Measurements are shared across every session in the \
-        project, Claude and Codex alike, so this will list work done in conversations other \
+        project, Claude, Codex and Antigravity alike, so this will list work done in conversations other \
         than this one.
         """,
       "inputSchema": [
@@ -1718,7 +1718,7 @@ struct AgentHubMCPServer {
         agenthub_artifact or agenthub_design when the user is refining something already on \
         screen — match their words against the titles and re-file with that id — and whenever \
         they ask what has been rendered or designed so far. Artifacts are shared across every \
-        session in the project, Claude and Codex alike.
+        session in the project, Claude, Codex and Antigravity alike.
         """,
       "inputSchema": [
         "type": "object",
@@ -1871,7 +1871,7 @@ private struct MCPWorktreeInventory {
     let lines = items.map { item in
       let branch = item.branch ?? "(detached)"
       let kind = item.isWorktree ? "worktree" : "main"
-      return "- \(branch) [\(kind)] \(item.path) - \(item.sessionCounts.total) sessions (Claude \(item.sessionCounts.claude), Codex \(item.sessionCounts.codex))"
+      return "- \(branch) [\(kind)] \(item.path) - \(item.sessionCounts.total) sessions (Claude \(item.sessionCounts.claude), Codex \(item.sessionCounts.codex), Antigravity \(item.sessionCounts.antigravity))"
     }
     return (["Worktrees for \(repositoryPath):"] + lines).joined(separator: "\n")
   }
@@ -1898,6 +1898,7 @@ private struct MCPWorktreeInventoryItem {
         "total": sessionCounts.total,
         "claude": sessionCounts.claude,
         "codex": sessionCounts.codex,
+        "antigravity": sessionCounts.antigravity,
       ],
     ]
     if let branch {

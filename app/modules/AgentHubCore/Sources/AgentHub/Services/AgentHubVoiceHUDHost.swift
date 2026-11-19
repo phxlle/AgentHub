@@ -100,9 +100,7 @@ public final class AgentHubVoiceHUDHost: VoiceHUDHost {
         : .failed("The selected session is no longer available.")
     }
 
-    let viewModel = target.provider == .claude
-      ? provider.claudeSessionsViewModel
-      : provider.codexSessionsViewModel
+    let viewModel = provider.sessionsViewModel(for: target.provider)
     if viewModel.typeTextInActiveTerminal(
       forKey: target.sessionId,
       text: transcript

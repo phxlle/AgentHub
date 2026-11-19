@@ -1,29 +1,42 @@
 import Foundation
+import SQLite3
 
 public struct WorktreeSessionCounts: Codable, Equatable, Sendable {
   public let claude: Int
   public let codex: Int
+  public let antigravity: Int
 
-  public init(claude: Int = 0, codex: Int = 0) {
+  public init(claude: Int = 0, codex: Int = 0, antigravity: Int = 0) {
     self.claude = claude
     self.codex = codex
+    self.antigravity = antigravity
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    claude = try container.decodeIfPresent(Int.self, forKey: .claude) ?? 0
+    codex = try container.decodeIfPresent(Int.self, forKey: .codex) ?? 0
+    antigravity = try container.decodeIfPresent(Int.self, forKey: .antigravity) ?? 0
   }
 
   public var total: Int {
-    claude + codex
+    claude + codex + antigravity
   }
 }
 
 public struct WorktreeSessionCounter: Sendable {
   private let claudeDataPath: String
   private let codexDataPath: String
+  private let antigravityDataPath: String
 
   public init(
     claudeDataPath: String = "~/.claude",
-    codexDataPath: String = "~/.codex"
+    codexDataPath: String = "~/.codex",
+    antigravityDataPath: String = "~/.gemini/antigravity-cli"
   ) {
     self.claudeDataPath = (claudeDataPath as NSString).expandingTildeInPath
     self.codexDataPath = (codexDataPath as NSString).expandingTildeInPath
+    self.antigravityDataPath = (antigravityDataPath as NSString).expandingTildeInPath
   }
 
   public func countSessions(for worktrees: [WorktreeInfo]) -> [String: WorktreeSessionCounts] {
@@ -52,11 +65,23 @@ public struct WorktreeSessionCounter: Sendable {
       codexSessionsByWorktree[worktreePath, default: []].insert(session.id)
     }
 
+    var antigravitySessionsByWorktree: [String: Set<String>] = [:]
+    for session in antigravitySessions() {
+      guard let worktreePath = Self.bestMatchingWorktree(
+        for: session.projectPath,
+        in: worktreePaths
+      ) else {
+        continue
+      }
+      antigravitySessionsByWorktree[worktreePath, default: []].insert(session.id)
+    }
+
     var counts: [String: WorktreeSessionCounts] = [:]
     for path in worktreePaths {
       counts[path] = WorktreeSessionCounts(
         claude: claudeSessionsByWorktree[path]?.count ?? 0,
-        codex: codexSessionsByWorktree[path]?.count ?? 0
+        codex: codexSessionsByWorktree[path]?.count ?? 0,
+        antigravity: antigravitySessionsByWorktree[path]?.count ?? 0
       )
     }
     return counts
@@ -120,6 +145,35 @@ public struct WorktreeSessionCounter: Sendable {
     }
 
     return (id: sessionId, projectPath: cwd)
+  }
+
+  /// Antigravity conversations with their workspace, from conversation_summaries.db.
+  private func antigravitySessions() -> [(id: String, projectPath: String)] {
+    let dbPath = (antigravityDataPath as NSString).appendingPathComponent("conversation_summaries.db")
+    guard FileManager.default.fileExists(atPath: dbPath) else { return [] }
+
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else { return [] }
+    defer { sqlite3_close(db) }
+
+    var statement: OpaquePointer?
+    let sql = "SELECT conversation_id, workspace_uris FROM conversation_summaries"
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else { return [] }
+    defer { sqlite3_finalize(statement) }
+
+    var sessions: [(id: String, projectPath: String)] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let idText = sqlite3_column_text(statement, 0),
+            let urisText = sqlite3_column_text(statement, 1) else { continue }
+      let id = String(cString: idText)
+      let uris = String(cString: urisText)
+      guard let data = uris.data(using: .utf8),
+            let list = try? JSONSerialization.jsonObject(with: data) as? [String],
+            let first = list.first,
+            let url = URL(string: first), url.isFileURL else { continue }
+      sessions.append((id: id, projectPath: url.path))
+    }
+    return sessions
   }
 
   private static func bestMatchingWorktree(for projectPath: String, in worktreePaths: [String]) -> String? {

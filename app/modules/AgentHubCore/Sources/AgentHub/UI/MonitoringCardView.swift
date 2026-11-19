@@ -233,7 +233,7 @@ public struct MonitoringCardView: View {
     viewModel?.measurements(for: session).count ?? 0
   }
 
-  /// Claude-only: Codex has no artifact surface, so its parser never files any.
+  /// Claude-only: Codex and Antigravity have no artifact surface, so their parsers never file any.
   private var detectedArtifacts: [ClaudeArtifact] {
     guard providerKind == .claude else { return [] }
     return state?.detectedArtifacts ?? []
@@ -712,6 +712,7 @@ public struct MonitoringCardView: View {
       repositories: WorktreeModuleResolver.mergedRepositories(
         (agentHub?.claudeSessionsViewModel.selectedRepositories ?? [])
           + (agentHub?.codexSessionsViewModel.selectedRepositories ?? [])
+          + (agentHub?.antigravitySessionsViewModel.selectedRepositories ?? [])
       )
     )
   }
@@ -1193,7 +1194,7 @@ public struct MonitoringCardView: View {
   private var liveCLIConfiguration: CLICommandConfiguration {
     viewModel?.cliConfiguration(for: providerKind)
       ?? cliConfiguration
-      ?? (providerKind == .claude ? .claudeDefault : .codexDefault)
+      ?? .default(for: providerKind)
   }
 
 }

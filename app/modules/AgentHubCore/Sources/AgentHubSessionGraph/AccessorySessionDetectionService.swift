@@ -66,15 +66,18 @@ public protocol AccessorySessionDetectionServiceProtocol: Sendable {
 public struct AccessorySessionDetectionService: AccessorySessionDetectionServiceProtocol, @unchecked Sendable {
   private let claudeDataPath: String
   private let codexDataPath: String
+  private let antigravityDataPath: String
   private let fileManager: FileManager
 
   public init(
     claudeDataPath: String = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude",
     codexDataPath: String = NSString(string: "~/.codex").expandingTildeInPath,
+    antigravityDataPath: String = AntigravitySessionFileScanner.defaultDataPath,
     fileManager: FileManager = .default
   ) {
     self.claudeDataPath = (claudeDataPath as NSString).expandingTildeInPath
     self.codexDataPath = (codexDataPath as NSString).expandingTildeInPath
+    self.antigravityDataPath = AntigravitySessionFileScanner.expandedDataPath(antigravityDataPath)
     self.fileManager = fileManager
   }
 
@@ -106,6 +109,8 @@ public struct AccessorySessionDetectionService: AccessorySessionDetectionService
       return detectClaudeSession(in: candidates, projectPath: path, startedAt: startedAt)
     case .codex:
       return detectCodexSession(in: candidates, projectPath: path, startedAt: startedAt)
+    case .antigravity:
+      return detectAntigravitySession(in: candidates, projectPath: path, startedAt: startedAt)
     }
   }
 
@@ -117,6 +122,8 @@ public struct AccessorySessionDetectionService: AccessorySessionDetectionService
       return Set(files.filter { $0.hasSuffix(".jsonl") }.map { "\(projectDir)/\($0)" })
     case .codex:
       return Set(CodexSessionFileScanner.listSessionFiles(codexDataPath: codexDataPath))
+    case .antigravity:
+      return Set(AntigravitySessionFileScanner.listSessionFiles(antigravityDataPath: antigravityDataPath))
     }
   }
 
@@ -163,6 +170,31 @@ public struct AccessorySessionDetectionService: AccessorySessionDetectionService
     guard matches.count == 1, let meta = matches.first else { return nil }
     return AccessorySessionDetectionResult(
       provider: .codex,
+      sessionId: meta.sessionId,
+      projectPath: meta.projectPath,
+      branchName: meta.branch,
+      sessionFilePath: meta.sessionFilePath
+    )
+  }
+
+  private func detectAntigravitySession(
+    in files: Set<String>,
+    projectPath: String,
+    startedAt: Date
+  ) -> AccessorySessionDetectionResult? {
+    let cutoff = startedAt.addingTimeInterval(-2)
+    var matches: [AntigravitySessionMeta] = []
+
+    for path in files {
+      guard let modifiedAt = fileActivityDate(path), modifiedAt >= cutoff else { continue }
+      guard let meta = AntigravitySessionFileScanner.readSessionMeta(from: path, antigravityDataPath: antigravityDataPath) else { continue }
+      guard meta.projectPath == projectPath || meta.projectPath.hasPrefix(projectPath + "/") else { continue }
+      matches.append(meta)
+    }
+
+    guard matches.count == 1, let meta = matches.first else { return nil }
+    return AccessorySessionDetectionResult(
+      provider: .antigravity,
       sessionId: meta.sessionId,
       projectPath: meta.projectPath,
       branchName: meta.branch,

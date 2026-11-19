@@ -17,6 +17,7 @@ public struct SettingsView: View {
   @State private var aiConfigViewModel = AIConfigSettingsViewModel()
   @State private var isClaudeConfigurationExpanded = true
   @State private var isCodexConfigurationExpanded = true
+  @State private var isAntigravityConfigurationExpanded = true
   @State private var pendingTerminalBackend: EmbeddedTerminalBackend?
   @State private var showTerminalBackendRelaunchAlert = false
   @State private var cliEnvironmentVariables = CLIEnvironmentOverrides.variables
@@ -88,17 +89,26 @@ public struct SettingsView: View {
   @AppStorage(AgentHubDefaults.codexCommand)
   private var codexCommand: String = "codex"
 
+  @AppStorage(AgentHubDefaults.antigravityCommand)
+  private var antigravityCommand: String = "agy"
+
   @AppStorage(AgentHubDefaults.claudeCommandLockedByDeveloper)
   private var claudeCommandLocked: Bool = false
 
   @AppStorage(AgentHubDefaults.codexCommandLockedByDeveloper)
   private var codexCommandLocked: Bool = false
 
+  @AppStorage(AgentHubDefaults.antigravityCommandLockedByDeveloper)
+  private var antigravityCommandLocked: Bool = false
+
   @AppStorage(AgentHubDefaults.claudeCommandArgs)
   private var claudeCommandArgs: String = ""
 
   @AppStorage(AgentHubDefaults.codexCommandArgs)
   private var codexCommandArgs: String = ""
+
+  @AppStorage(AgentHubDefaults.antigravityCommandArgs)
+  private var antigravityCommandArgs: String = ""
 
   @AppStorage(AgentHubDefaults.webPreviewInspectorDataLevel)
   private var webPreviewInspectorDataLevelRawValue: String = ElementInspectorDataLevel.regular.rawValue
@@ -269,7 +279,7 @@ public struct SettingsView: View {
       Section("Global session control panel") {
         settingsToggle(
           title: "Enable global shortcut",
-          description: "Open a floating panel of monitored Claude and Codex sessions from anywhere",
+          description: "Open a floating panel of monitored Claude, Codex and Antigravity sessions from anywhere",
           isOn: $globalSessionPanelEnabled
         )
         .onChange(of: globalSessionPanelEnabled) { _, newValue in
@@ -392,6 +402,18 @@ public struct SettingsView: View {
           installed: CLIDetectionService.isCodexInstalled()
         ) {
           CodexAIConfigView(viewModel: aiConfigViewModel)
+        }
+
+        providerConfigurationSection(
+          title: "Antigravity",
+          provider: .antigravity,
+          isExpanded: $isAntigravityConfigurationExpanded,
+          command: $antigravityCommand,
+          commandArgs: $antigravityCommandArgs,
+          locked: antigravityCommandLocked,
+          installed: CLIDetectionService.isAntigravityInstalled()
+        ) {
+          EmptyView()
         }
       }
 

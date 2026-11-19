@@ -13,7 +13,7 @@
 <img width="1299" height="692" alt="Screenshot 2026-05-26 at 4 36 20 PM" src="https://github.com/user-attachments/assets/602cae08-8cd9-40b0-a797-47e78a53568d" />
 <img width="1330" height="660" alt="Screenshot 2026-05-26 at 4 36 36 PM" src="https://github.com/user-attachments/assets/9b08937b-0847-44c0-aa82-26946aedacae" />
 
-- **Multi-provider support** — Monitor and launch Claude Code and Codex sessions side by side
+- **Multi-provider support** — Monitor and launch Claude Code, Codex and Antigravity (`agy`) sessions side by side
 - **Real-time session monitoring** — Watch all sessions update live via file-system watchers (no polling)
 - **Embedded terminal** — Full PTY terminal (SwiftTerm) inside each monitoring card; resume or start sessions without leaving the app
 - **Hub panel** — Unified view of all sessions across providers with single, list, 2-column, and 3-column grid layouts
@@ -24,8 +24,8 @@
 rom session rows, and send GitHub context back into a session
 - **File explorer and built-in editor** — Browse the project tree, jump to files with Cmd+P, edit files in-app with syntax highlighting, and save changes without leaving AgentHub
 - **Git worktree management** — Create and delete sibling worktrees from the UI, launch sessions on new branches, and choose whether AgentHub-owned worktree sessions appear under the parent module or as separate modules
-- **Remix with provider picker** — Branch any session into an isolated git worktree and continue it in Claude or Codex; the original session's transcript is passed as context to the new session
-- **Multi-session launcher** — Launch parallel sessions across Claude and Codex with manual prompts or AI-planned orchestration (Smart mode)
+- **Remix with provider picker** — Branch any session into an isolated git worktree and continue it in Claude, Codex or Antigravity; the original session's transcript is passed as context to the new session
+- **Multi-session launcher** — Launch parallel sessions across Claude, Codex and Antigravity with manual prompts or AI-planned orchestration (Smart mode)
 - **Measurements** — Agents record measurements they produce (a claim, the chart behind it, the query, and caveats) into a per-project panel; re-run any of them later to refresh the numbers and build up a history
 - **Mermaid diagrams** — Detects Mermaid diagram syntax in session output and renders it natively; diagrams can be exported as images
 - **Web preview** — Prefers agent-started localhost servers, recovers recent localhost URLs from session files when needed, and falls back to static HTML (`index.html` first) when no live preview is available
@@ -174,6 +174,7 @@ See **[`SimulatorPreview.md`](SimulatorPreview.md)** for the module architecture
 - macOS 14.0+
 - [Claude Code CLI](https://claude.ai/claude-code) installed and authenticated
 - [Codex CLI](https://openai.com/index/introducing-codex/) installed (optional, for Codex features)
+- [Antigravity CLI](https://antigravity.google) (`agy`) installed (optional, for Antigravity features; AgentHub's own MCP tools are not injected into agy sessions yet)
 - [GitHub CLI](https://cli.github.com/) installed and authenticated (optional overall, required for GitHub access/features)
 
 ## Installation & Updates

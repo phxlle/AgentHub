@@ -421,12 +421,13 @@ private extension ClaudeWorktreeBranchNamingService {
     return WorktreeBranchNamingResult(
       claude: providers.contains(.claude) ? baseName + "-claude" : nil,
       codex: providers.contains(.codex) ? baseName + "-codex" : nil,
+      antigravity: providers.contains(.antigravity) ? baseName + "-antigravity" : nil,
       source: source
     )
   }
 
   nonisolated static func resolvedBranchNames(from result: WorktreeBranchNamingResult) -> [String] {
-    [result.single, result.claude, result.codex].compactMap { $0 }
+    [result.single, result.claude, result.codex, result.antigravity].compactMap { $0 }
   }
 
   nonisolated static func timeoutLabel(_ duration: Duration) -> String {
@@ -437,7 +438,7 @@ private extension ClaudeWorktreeBranchNamingService {
 
   func logResolvedNames(_ result: WorktreeBranchNamingResult) {
     AppLogger.intelligence.info(
-      "\(Self.logPrefix, privacy: .public) Resolved branch names source=\(result.source.rawValue, privacy: .public) single=\(result.single ?? "-", privacy: .public) claude=\(result.claude ?? "-", privacy: .public) codex=\(result.codex ?? "-", privacy: .public)"
+      "\(Self.logPrefix, privacy: .public) Resolved branch names source=\(result.source.rawValue, privacy: .public) single=\(result.single ?? "-", privacy: .public) claude=\(result.claude ?? "-", privacy: .public) codex=\(result.codex ?? "-", privacy: .public) antigravity=\(result.antigravity ?? "-", privacy: .public)"
     )
   }
 }

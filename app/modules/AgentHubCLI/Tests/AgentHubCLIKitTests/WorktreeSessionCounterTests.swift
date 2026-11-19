@@ -50,6 +50,14 @@ struct WorktreeSessionCounterTests {
     #expect(counts[otherPath]?.claude == 0)
     #expect(counts[otherPath]?.codex == 1)
   }
+
+  @Test("Counts decode without the antigravity key")
+  func decodesWithoutAntigravity() throws {
+    let data = Data(#"{"claude": 2, "codex": 1}"#.utf8)
+    let counts = try JSONDecoder().decode(WorktreeSessionCounts.self, from: data)
+    #expect(counts.antigravity == 0)
+    #expect(counts.total == 3)
+  }
 }
 
 private func codexMetaLine(id: String, cwd: String) -> String {

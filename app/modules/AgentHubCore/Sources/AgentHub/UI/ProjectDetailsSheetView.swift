@@ -4,7 +4,7 @@
 //
 //  Project Details panel: every session that belongs to a module (including
 //  worktree sessions) plus the skills, rules, and MCP servers available to it,
-//  with personal-vs-project scope and Claude/Codex availability called out.
+//  with personal-vs-project scope and Claude/Codex/Antigravity availability called out.
 //
 
 import SwiftUI
@@ -58,6 +58,7 @@ struct ProjectDetailsSheetView: View {
   let displayName: String
   let claudeViewModel: CLISessionsViewModel
   let codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
   let onDismiss: () -> Void
   let onSelectSession: (ProjectDetailsSessionItem) -> Void
 
@@ -76,6 +77,7 @@ struct ProjectDetailsSheetView: View {
     displayName: String,
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     inventoryService: any ProjectDetailsInventoryServiceProtocol = ProjectDetailsInventoryService.shared,
     contextProfileService: (any ContextProfileServiceProtocol)? = nil,
     onDismiss: @escaping () -> Void,
@@ -85,12 +87,14 @@ struct ProjectDetailsSheetView: View {
     self.displayName = displayName
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.onDismiss = onDismiss
     self.onSelectSession = onSelectSession
     let rootPath = WorktreeModuleResolver.bestMatch(
       for: modulePath,
       repositories: WorktreeModuleResolver.mergedRepositories(
         claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+          + (antigravityViewModel?.selectedRepositories ?? [])
       )
     )?.repository.path ?? WorktreeModuleResolver.normalizedDirectoryPath(modulePath)
     _viewModel = State(initialValue: ProjectDetailsViewModel(
@@ -266,6 +270,7 @@ struct ProjectDetailsSheetView: View {
   private var mergedRepositories: [SelectedRepository] {
     WorktreeModuleResolver.mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     )
   }
 
@@ -285,8 +290,13 @@ struct ProjectDetailsSheetView: View {
     }
 
     var items: [ProjectDetailsSessionItem] = []
-    for (providerViewModel, provider) in [(claudeViewModel, SessionProviderKind.claude),
-                                          (codexViewModel, .codex)] {
+    var providerViewModels: [(CLISessionsViewModel, SessionProviderKind)] = [
+      (claudeViewModel, .claude), (codexViewModel, .codex),
+    ]
+    if let antigravityViewModel {
+      providerViewModels.append((antigravityViewModel, .antigravity))
+    }
+    for (providerViewModel, provider) in providerViewModels {
       for pending in providerViewModel.pendingHubSessions
       where belongs(pending.placeholderSession.projectPath) {
         items.append(ProjectDetailsSessionItem(

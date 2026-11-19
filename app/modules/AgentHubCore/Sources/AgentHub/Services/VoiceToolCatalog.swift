@@ -154,14 +154,14 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
     VoiceTool(
       name: "list_sessions",
       description: """
-        List AgentHub Claude and Codex sessions. Call this before referencing a
+        List AgentHub Claude, Codex and Antigravity sessions. Call this before referencing a
         session so you use an exact session ID.
         """,
       parameters: objectSchema(
         properties: [
           "provider": [
             "type": "string",
-            "enum": ["claude", "codex", "all"],
+            "enum": ["claude", "codex", "antigravity", "all"],
             "description": "Optional provider filter. Defaults to all.",
           ],
         ]
@@ -425,7 +425,7 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
           ],
           "provider": [
             "type": "string",
-            "enum": ["claude", "codex"],
+            "enum": ["claude", "codex", "antigravity"],
             "description": "Provider for tasks that do not set one. Defaults to claude.",
           ],
           "tasks": .object([
@@ -444,7 +444,7 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
                 ],
                 "provider": [
                   "type": "string",
-                  "enum": ["claude", "codex"],
+                  "enum": ["claude", "codex", "antigravity"],
                 ],
               ]),
               "required": .array(["branch", "prompt"]),
@@ -513,7 +513,7 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
           ],
           "provider": [
             "type": "string",
-            "enum": ["claude", "codex"],
+            "enum": ["claude", "codex", "antigravity"],
           ],
           "prompt": [
             "type": "string",
@@ -550,7 +550,7 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
       description: """
         Approve or deny a pending Claude tool. First call without confirmed,
         read the returned tool and detail aloud, ask the user, then call again
-        with confirmed true. Codex approvals are not supported.
+        with confirmed true. Codex and Antigravity approvals are not supported.
         """,
       parameters: objectSchema(
         properties: [
@@ -581,7 +581,7 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
   }
 
   private func handleApproval(_ arguments: ApprovalArguments) -> String {
-    if executor.sessionStatus(sessionId: arguments.sessionId)?.provider == .codex {
+    if let provider = executor.sessionStatus(sessionId: arguments.sessionId)?.provider, provider != .claude {
       return Self.encode(
         BasicToolResult(
           status: "rejected",
@@ -661,6 +661,8 @@ public final class VoiceToolCatalog: VoiceToolCataloging {
       .claude
     case "codex":
       .codex
+    case "antigravity", "agy":
+      .antigravity
     default:
       nil
     }

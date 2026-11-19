@@ -33,6 +33,7 @@ public final class CLISessionsViewModel {
   public let cliConfiguration: CLICommandConfiguration
   public let providerKind: SessionProviderKind
   private let codexDataPath: String
+  private let antigravityDataPath: String
   private let worktreeService = GitWorktreeService()
   private let worktreeRemovalService: any GitWorktreeRemovalServiceProtocol
   private let metadataStore: SessionMetadataStore?
@@ -952,6 +953,8 @@ public final class CLISessionsViewModel {
       return defaults.string(forKey: AgentHubDefaults.claudeCommand) ?? cliConfiguration.command
     case .codex:
       return defaults.string(forKey: AgentHubDefaults.codexCommand) ?? cliConfiguration.command
+    case .antigravity:
+      return defaults.string(forKey: AgentHubDefaults.antigravityCommand) ?? cliConfiguration.command
     }
   }
 
@@ -963,6 +966,8 @@ public final class CLISessionsViewModel {
       rawArgs = defaults.string(forKey: AgentHubDefaults.claudeCommandArgs)
     case .codex:
       rawArgs = defaults.string(forKey: AgentHubDefaults.codexCommandArgs)
+    case .antigravity:
+      rawArgs = defaults.string(forKey: AgentHubDefaults.antigravityCommandArgs)
     }
     guard let rawArgs else { return cliConfiguration.extraArgs }
     return CLICommandConfiguration.parseArgumentString(rawArgs)
@@ -984,15 +989,14 @@ public final class CLISessionsViewModel {
     }
 
     if let hub = agentHubProvider {
-      switch provider {
-      case .claude:
-        return hub.claudeSessionsViewModel.currentCLIConfiguration
-      case .codex:
-        return hub.codexSessionsViewModel.currentCLIConfiguration
-      }
+      return hub.sessionsViewModel(for: provider).currentCLIConfiguration
     }
 
-    return provider == .claude ? .claudeDefault : .codexDefault
+    switch provider {
+    case .claude: return .claudeDefault
+    case .codex: return .codexDefault
+    case .antigravity: return .antigravityDefault
+    }
   }
 
   private struct AccessoryDetectionContextKey: Hashable, Sendable {
@@ -2000,6 +2004,7 @@ public final class CLISessionsViewModel {
     approvalClaimStore: (any ApprovalClaimStoreProtocol)? = nil,
     hookInstaller: (any ClaudeHookInstallerProtocol)? = nil,
     codexDataPath: String? = nil,
+    antigravityDataPath: String? = nil,
     worktreeRemovalService: any GitWorktreeRemovalServiceProtocol = GitWorktreeService(),
     terminalSurfaceFactory: any EmbeddedTerminalSurfaceFactory =
       DefaultEmbeddedTerminalSurfaceFactory(),
@@ -2028,6 +2033,8 @@ public final class CLISessionsViewModel {
     self.cliConfiguration = cliConfiguration
     self.providerKind = providerKind
     self.codexDataPath = NSString(string: codexDataPath ?? "~/.codex").expandingTildeInPath
+    self.antigravityDataPath = AntigravitySessionFileScanner.expandedDataPath(
+      antigravityDataPath ?? AntigravitySessionFileScanner.defaultDataPath)
     self.showLastMessage = UserDefaults.standard.bool(forKey: "CLISessionsShowLastMessage")
 
     // Load approval timeout with default of 5 seconds
@@ -3269,9 +3276,9 @@ public final class CLISessionsViewModel {
 
   /// Checks if the session file exists for the current provider
   private func sessionFileExists(session: CLISession) -> Bool {
-    // For Codex, if we found the session in allSessions, the monitor service
-    // already verified the file exists during scanning
-    if providerKind == .codex {
+    // For Codex and Antigravity, if we found the session in allSessions, the monitor
+    // service already verified the file exists during scanning
+    if providerKind != .claude {
       return session.sessionFilePath != nil
     }
 
@@ -3291,6 +3298,8 @@ public final class CLISessionsViewModel {
       let encodedPath = session.projectPath.claudeProjectPathEncoded
       let sessionFile = "\(claudeDataPath)/projects/\(encodedPath)/\(session.id).jsonl"
       return URL(fileURLWithPath: sessionFile)
+    case .antigravity:
+      return URL(fileURLWithPath: AntigravitySessionFileScanner.transcriptPath(dataPath: antigravityDataPath, conversationId: session.id))
     case .codex:
       return nil
     }
@@ -4002,10 +4011,7 @@ public final class CLISessionsViewModel {
         // Resolve which ViewModel launches the new session
         let resolvedProvider = targetProvider ?? providerKind
         if resolvedProvider != providerKind, let hub = agentHubProvider {
-          let targetViewModel =
-            resolvedProvider == .claude
-            ? hub.claudeSessionsViewModel
-            : hub.codexSessionsViewModel
+          let targetViewModel = hub.sessionsViewModel(for: resolvedProvider)
           targetViewModel.addRepository(at: session.projectPath)
           let worktree = await targetViewModel.registerCreatedWorktree(
             name: branchName,
@@ -4133,6 +4139,8 @@ public final class CLISessionsViewModel {
       )
     case .codex:
       return Set(CodexSessionFileScanner.listSessionFiles(codexDataPath: codexDataPath))
+    case .antigravity:
+      return Set(AntigravitySessionFileScanner.listSessionFiles(antigravityDataPath: antigravityDataPath))
     }
   }
 
@@ -4184,6 +4192,8 @@ public final class CLISessionsViewModel {
       await watchForNewClaudeSession(pending: pending, worktree: worktree)
     case .codex:
       await watchForNewCodexSession(pending: pending, worktree: worktree)
+    case .antigravity:
+      await watchForNewAntigravitySession(pending: pending, worktree: worktree)
     }
   }
 
@@ -4323,7 +4333,7 @@ public final class CLISessionsViewModel {
     worktree: WorktreeBranch,
     sessionFilePath: String? = nil
   ) -> Bool {
-    let detectionIdentifier = providerKind == .codex ? sessionFilePath ?? sessionId : sessionId
+    let detectionIdentifier = providerKind != .claude ? sessionFilePath ?? sessionId : sessionId
     guard !pending.existingSessionIdentifiers.contains(detectionIdentifier) else { return false }
     if let claimOwner = pendingSessionClaims[sessionId], claimOwner != pending.id {
       return false
@@ -4460,7 +4470,7 @@ public final class CLISessionsViewModel {
           .first { $0.path == worktree.path }?
           .sessions ?? []
 
-        if providerKind == .codex,
+        if providerKind != .claude,
           currentSessions.isEmpty,
           let sessionFilePath
         {
@@ -4739,6 +4749,67 @@ public final class CLISessionsViewModel {
       || meta.projectPath.hasPrefix(pending.projectPath + "/")
       || meta.projectPath == worktree.path
       || meta.projectPath.hasPrefix(worktree.path + "/")
+  }
+
+  // MARK: - Antigravity New Session Detection
+
+  /// Watches the Antigravity brain directory for a new conversation transcript.
+  /// The transcript appears first; its workspace row in conversation_summaries.db
+  /// follows within about a second, so a transcript without a row is retried
+  /// on the next poll.
+  @MainActor
+  private func watchForNewAntigravitySession(pending: PendingHubSession, worktree: WorktreeBranch) async {
+    var knownFiles = Set(AntigravitySessionFileScanner.listSessionFiles(antigravityDataPath: antigravityDataPath))
+    if let meta = findRecentAntigravitySession(
+      in: knownFiles.subtracting(pending.existingSessionIdentifiers), pending: pending, worktree: worktree),
+      handleNewSessionFound(
+        sessionId: meta.sessionId, pending: pending, worktree: worktree, sessionFilePath: meta.sessionFilePath)
+    {
+      return
+    }
+
+    while true {
+      try? await Task.sleep(for: .seconds(1))
+      if !pendingHubSessions.contains(where: { $0.id == pending.id }) {
+        return
+      }
+      let currentFiles = Set(AntigravitySessionFileScanner.listSessionFiles(antigravityDataPath: antigravityDataPath))
+      let newFiles = currentFiles.subtracting(knownFiles)
+      let candidates = newFiles.isEmpty ? currentFiles.subtracting(pending.existingSessionIdentifiers) : newFiles
+      if let meta = findRecentAntigravitySession(in: candidates, pending: pending, worktree: worktree),
+        handleNewSessionFound(
+          sessionId: meta.sessionId, pending: pending, worktree: worktree, sessionFilePath: meta.sessionFilePath)
+      {
+        return
+      }
+      // Keep files without a summary row as unknown so they are re-checked.
+      knownFiles = currentFiles.filter {
+        AntigravitySessionFileScanner.readSessionMeta(from: $0, antigravityDataPath: antigravityDataPath) != nil
+      }
+    }
+  }
+
+  private func findRecentAntigravitySession(
+    in filePaths: Set<String>,
+    pending: PendingHubSession,
+    worktree: WorktreeBranch
+  ) -> AntigravitySessionMeta? {
+    let cutoff = pending.startedAt.addingTimeInterval(-2)
+    var newest: (meta: AntigravitySessionMeta, modifiedAt: Date)?
+    for path in filePaths where !pending.existingSessionIdentifiers.contains(path) {
+      guard let modifiedAt = fileModificationDate(path), modifiedAt >= cutoff else { continue }
+      guard let meta = AntigravitySessionFileScanner.readSessionMeta(from: path, antigravityDataPath: antigravityDataPath) else { continue }
+      guard pendingSessionClaims[meta.sessionId] == nil else { continue }
+      let matches = meta.projectPath == pending.projectPath
+        || meta.projectPath.hasPrefix(pending.projectPath + "/")
+        || meta.projectPath == worktree.path
+        || meta.projectPath.hasPrefix(worktree.path + "/")
+      guard matches else { continue }
+      if newest == nil || modifiedAt > newest!.modifiedAt {
+        newest = (meta, modifiedAt)
+      }
+    }
+    return newest?.meta
   }
 
   private func fileModificationDate(_ path: String) -> Date? {

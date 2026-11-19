@@ -22,8 +22,7 @@ extension AgentHubProvider {
 
   /// Opens a linked session in Sessions, starting to monitor it when needed.
   func showSession(_ link: JiraLinkedSession) {
-    let sessionsViewModel =
-      link.provider == .claude ? claudeSessionsViewModel : codexSessionsViewModel
+    let sessionsViewModel = sessionsViewModel(for: link.provider)
     if let session = link.session {
       if !sessionsViewModel.isMonitoring(sessionId: session.id) {
         sessionsViewModel.startMonitoring(session: session)
@@ -39,10 +38,10 @@ extension AgentHubProvider {
     AgentHubAppCommand.selectWorkspace(.sessions)
   }
 
-  /// Sessions linked to each Jira ticket key, across Claude and Codex.
+  /// Sessions linked to each Jira ticket key, across all providers.
   func jiraLinkedSessions() -> [String: [JiraLinkedSession]] {
     jiraSprintViewModel.sessionLinker.links(
-      from: [claudeSessionsViewModel, codexSessionsViewModel],
+      from: SessionProviderKind.allCases.map(sessionsViewModel(for:)),
       knownProjectKeys: jiraSprintViewModel.knownProjectKeys
     )
   }
@@ -58,11 +57,13 @@ extension AgentHubProvider {
       repositories: [
         .claude: claudeSessionsViewModel.selectedRepositories,
         .codex: codexSessionsViewModel.selectedRepositories,
+        .antigravity: antigravitySessionsViewModel.selectedRepositories,
       ]
     )
     guard !plan.isEmpty else { return }
     let viewModels: [SessionProviderKind: CLISessionsViewModel] = [
       .claude: claudeSessionsViewModel, .codex: codexSessionsViewModel,
+      .antigravity: antigravitySessionsViewModel,
     ]
     var removed = 0
     var failures: [String] = []

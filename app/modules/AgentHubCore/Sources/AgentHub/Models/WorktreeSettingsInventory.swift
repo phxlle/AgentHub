@@ -41,10 +41,12 @@ enum WorktreeSettingsInventoryBuilder {
     codexRepositories: [SelectedRepository],
     claudeMonitoredSessions: [CLISession],
     codexMonitoredSessions: [CLISession],
+    antigravityRepositories: [SelectedRepository] = [],
+    antigravityMonitoredSessions: [CLISession] = [],
     discoveredWorktreesByRepositoryPath: [String: [GitWorktreeInventoryItem]] = [:]
   ) -> WorktreeSettingsSnapshot {
     let mergedRepositories = WorktreeModuleResolver
-      .mergedRepositories(claudeRepositories + codexRepositories)
+      .mergedRepositories(claudeRepositories + codexRepositories + antigravityRepositories)
       .reversed()
 
     let modules = mergedRepositories.map { repository in
@@ -56,6 +58,8 @@ enum WorktreeSettingsInventoryBuilder {
         codexRepositories: codexRepositories,
         claudeMonitoredSessions: claudeMonitoredSessions,
         codexMonitoredSessions: codexMonitoredSessions,
+        antigravityRepositories: antigravityRepositories,
+        antigravityMonitoredSessions: antigravityMonitoredSessions,
         discoveredWorktrees: discoveredWorktreesByRepositoryPath[modulePath] ?? []
       )
 
@@ -76,11 +80,14 @@ enum WorktreeSettingsInventoryBuilder {
     codexRepositories: [SelectedRepository],
     claudeMonitoredSessions: [CLISession],
     codexMonitoredSessions: [CLISession],
+    antigravityRepositories: [SelectedRepository],
+    antigravityMonitoredSessions: [CLISession],
     discoveredWorktrees: [GitWorktreeInventoryItem]
   ) -> [WorktreeSettingsWorktree] {
     let providerRepositories = [
       (kind: SessionProviderKind.claude, repositories: claudeRepositories),
       (kind: SessionProviderKind.codex, repositories: codexRepositories),
+      (kind: SessionProviderKind.antigravity, repositories: antigravityRepositories),
     ]
 
     var orderedPaths: [String] = []
@@ -129,6 +136,12 @@ enum WorktreeSettingsInventoryBuilder {
           return sessions(
             in: worktreePath,
             from: codexMonitoredSessions,
+            attachedTo: providerWorktree
+          )
+        case .antigravity:
+          return sessions(
+            in: worktreePath,
+            from: antigravityMonitoredSessions,
             attachedTo: providerWorktree
           )
         }

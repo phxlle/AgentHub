@@ -24,13 +24,16 @@ enum WorktreeLaunchRequestHandlingError: LocalizedError {
 public final class WorktreeLaunchRequestHandler: WorktreeLaunchRequestHandlingProtocol {
   private let claudeViewModel: CLISessionsViewModel
   private let codexViewModel: CLISessionsViewModel
+  private let antigravityViewModel: CLISessionsViewModel?
 
   public init(
     claudeViewModel: CLISessionsViewModel,
-    codexViewModel: CLISessionsViewModel
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
   }
 
   public func handle(_ request: WorktreeLaunchRequest) async throws {
@@ -48,10 +51,12 @@ public final class WorktreeLaunchRequestHandler: WorktreeLaunchRequestHandlingPr
       launchViewModel = claudeViewModel
     case .codex:
       launchViewModel = codexViewModel
+    case .antigravity:
+      launchViewModel = antigravityViewModel ?? claudeViewModel
     }
 
     var launchWorktree: WorktreeBranch?
-    for viewModel in uniqueViewModels([claudeViewModel, codexViewModel]) {
+    for viewModel in uniqueViewModels([claudeViewModel, codexViewModel] + (antigravityViewModel.map { [$0] } ?? [])) {
       let worktree = await viewModel.registerCreatedWorktree(
         name: request.branchName,
         path: request.worktreePath,

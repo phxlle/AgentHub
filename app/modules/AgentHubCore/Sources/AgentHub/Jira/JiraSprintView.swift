@@ -3,7 +3,7 @@
 //  AgentHub
 //
 //  Jira sprint board: status columns, assignee/sprint switching, ticket details,
-//  and handing a ticket to Claude or Codex.
+//  and handing a ticket to Claude, Codex or Antigravity.
 //
 
 import AgentWorkflowJiraCLI
