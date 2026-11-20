@@ -55,6 +55,7 @@ private struct GlobalSessionCleanupDeletionResult: Identifiable {
 public struct GlobalSessionControlPanelView: View {
   @Bindable var claudeViewModel: CLISessionsViewModel
   @Bindable var codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
 
   let selectionRouter: GlobalSessionSelectionRouter
   let onClose: () -> Void
@@ -78,6 +79,7 @@ public struct GlobalSessionControlPanelView: View {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     selectionRouter: GlobalSessionSelectionRouter,
     displayModeToggleRelay: GlobalSessionPanelDisplayModeToggleRelay? = nil,
     defaults: UserDefaults = .standard,
@@ -88,6 +90,7 @@ public struct GlobalSessionControlPanelView: View {
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.selectionRouter = selectionRouter
     self.displayModeToggleRelay = displayModeToggleRelay
     self.defaults = defaults
@@ -294,10 +297,13 @@ public struct GlobalSessionControlPanelView: View {
     GlobalSessionControlPanelSnapshotBuilder.makeItems(
       claudePending: claudeViewModel.pendingHubSessions,
       codexPending: codexViewModel.pendingHubSessions,
+      antigravityPending: antigravityViewModel?.pendingHubSessions ?? [],
       claudeMonitored: claudeViewModel.monitoredSessions,
       codexMonitored: codexViewModel.monitoredSessions,
+      antigravityMonitored: antigravityViewModel?.monitoredSessions ?? [],
       claudeCustomNames: claudeViewModel.sessionCustomNames,
       codexCustomNames: codexViewModel.sessionCustomNames,
+      antigravityCustomNames: antigravityViewModel?.sessionCustomNames ?? [:],
       gitHubStates: gitHubStates
     )
   }
@@ -328,8 +334,12 @@ public struct GlobalSessionControlPanelView: View {
 
   private var cleanupRepositories: [SelectedRepository] {
     WorktreeModuleResolver.mergedRepositories(
-      claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+      allViewModels.flatMap(\.selectedRepositories)
     )
+  }
+
+  private var allViewModels: [CLISessionsViewModel] {
+    [claudeViewModel, codexViewModel] + (antigravityViewModel.map { [$0] } ?? [])
   }
 
   // Item IDs whose worktree is a safe-to-delete cleanup candidate (merged PR and
@@ -576,6 +586,7 @@ public struct GlobalSessionControlPanelView: View {
 
     claudeViewModel.refresh()
     codexViewModel.refresh()
+    antigravityViewModel?.refresh()
     isDeletingSuggestedWorktrees = false
     deletionResult = GlobalSessionCleanupDeletionResult(deleted: deleted, failures: failures)
   }
@@ -589,14 +600,25 @@ public struct GlobalSessionControlPanelView: View {
     if containsWorktree(at: suggestion.worktreePath, in: codexViewModel) {
       return codexViewModel
     }
+    if let antigravityViewModel,
+      containsWorktree(at: suggestion.worktreePath, in: antigravityViewModel)
+    {
+      return antigravityViewModel
+    }
     if suggestion.providerKinds.contains(.codex), !suggestion.providerKinds.contains(.claude) {
       return codexViewModel
+    }
+    if let antigravityViewModel,
+      suggestion.providerKinds.contains(.antigravity),
+      !suggestion.providerKinds.contains(.claude)
+    {
+      return antigravityViewModel
     }
     return claudeViewModel
   }
 
   private func matchingWorktree(at path: String) -> WorktreeBranch? {
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       for repository in viewModel.selectedRepositories {
         if let worktree = repository.worktrees.first(where: {
           WorktreeModuleResolver.normalizedDirectoryPath($0.path) == path
@@ -617,7 +639,7 @@ public struct GlobalSessionControlPanelView: View {
   }
 
   private func removeFromSidebars(worktreePath: String) {
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       viewModel.archiveMonitoredSessions(inWorktreePath: worktreePath)
       viewModel.forgetOwnedWorktreePath(worktreePath)
     }

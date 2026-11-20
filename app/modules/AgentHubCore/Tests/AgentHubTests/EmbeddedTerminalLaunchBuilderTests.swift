@@ -464,7 +464,7 @@ struct EmbeddedTerminalLaunchBuilderAgentHubCLITests {
         contentsOf: directory.appendingPathComponent(fileName),
         encoding: .utf8
       )
-    case .codex:
+    case .codex, .antigravity:
       mcpConfiguration = launch.shellCommand
     }
 

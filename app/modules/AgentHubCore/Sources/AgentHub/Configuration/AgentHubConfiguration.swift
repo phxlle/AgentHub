@@ -25,6 +25,9 @@ public struct AgentHubConfiguration: Sendable {
   /// Path to Codex data directory (default: ~/.codex)
   public var codexDataPath: String
 
+  /// Path to Antigravity CLI data directory (default: ~/.gemini/antigravity-cli)
+  public var antigravityDataPath: String
+
   /// Enable debug logging for troubleshooting
   public var enableDebugLogging: Bool
 
@@ -43,6 +46,9 @@ public struct AgentHubConfiguration: Sendable {
   /// Companies can configure this for white-labeling
   public var codexCommand: String
 
+  /// The Antigravity CLI command name to use (default: "agy")
+  public var antigravityCommand: String
+
   /// Session provider to use (Claude or Codex)
   public var sessionProvider: SessionProviderKind
 
@@ -50,21 +56,25 @@ public struct AgentHubConfiguration: Sendable {
   public init(
     claudeDataPath: String = "~/.claude",
     codexDataPath: String = "~/.codex",
+    antigravityDataPath: String = "~/.gemini/antigravity-cli",
     enableDebugLogging: Bool = false,
     additionalCLIPaths: [String] = [],
     statsDisplayMode: StatsDisplayMode = .menuBar,
     cliCommand: String = "claude",
     codexCommand: String = "codex",
+    antigravityCommand: String = "agy",
     sessionProvider: SessionProviderKind = .claude
   ) {
     let expanded = NSString(string: claudeDataPath).expandingTildeInPath
     self.claudeDataPath = expanded
     self.codexDataPath = NSString(string: codexDataPath).expandingTildeInPath
+    self.antigravityDataPath = NSString(string: antigravityDataPath).expandingTildeInPath
     self.enableDebugLogging = enableDebugLogging
     self.additionalCLIPaths = additionalCLIPaths
     self.statsDisplayMode = statsDisplayMode
     self.cliCommand = cliCommand
     self.codexCommand = codexCommand
+    self.antigravityCommand = antigravityCommand
     self.sessionProvider = sessionProvider
   }
 

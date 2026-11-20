@@ -33,7 +33,7 @@ public struct CLIWorktreeBranchRow: View {
   @State private var showNewSessionMenu: Bool = false
 
   private var providerLabel: String {
-    providerKind == .claude ? "Claude" : "Codex"
+    providerKind.rawValue
   }
 
   private var supportsDangerousMode: Bool {

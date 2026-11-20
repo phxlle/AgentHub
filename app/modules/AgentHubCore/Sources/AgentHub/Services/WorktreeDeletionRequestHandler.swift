@@ -21,13 +21,16 @@ enum WorktreeDeletionRequestHandlingError: LocalizedError {
 public final class WorktreeDeletionRequestHandler: WorktreeDeletionRequestHandlingProtocol {
   private let claudeViewModel: CLISessionsViewModel
   private let codexViewModel: CLISessionsViewModel
+  private let antigravityViewModel: CLISessionsViewModel?
 
   public init(
     claudeViewModel: CLISessionsViewModel,
-    codexViewModel: CLISessionsViewModel
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
   }
 
   public func handle(_ request: WorktreeDeletionRequest) async throws {
@@ -53,7 +56,7 @@ public final class WorktreeDeletionRequestHandler: WorktreeDeletionRequestHandli
   }
 
   private func matchingWorktree(at path: String) -> WorktreeBranch? {
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       for repository in viewModel.selectedRepositories {
         if let worktree = repository.worktrees.first(where: {
           WorktreeModuleResolver.normalizedDirectoryPath($0.path) == path
@@ -75,13 +78,22 @@ public final class WorktreeDeletionRequestHandler: WorktreeDeletionRequestHandli
     if containsWorktree(at: worktreePath, in: codexViewModel) {
       return codexViewModel
     }
+    if let antigravityViewModel, containsWorktree(at: worktreePath, in: antigravityViewModel) {
+      return antigravityViewModel
+    }
 
     switch sourceProvider {
     case .codex:
       return codexViewModel
+    case .antigravity:
+      return antigravityViewModel ?? claudeViewModel
     case .claude, .none:
       return claudeViewModel
     }
+  }
+
+  private var allViewModels: [CLISessionsViewModel] {
+    [claudeViewModel, codexViewModel] + (antigravityViewModel.map { [$0] } ?? [])
   }
 
   private func containsWorktree(at path: String, in viewModel: CLISessionsViewModel) -> Bool {
@@ -93,7 +105,7 @@ public final class WorktreeDeletionRequestHandler: WorktreeDeletionRequestHandli
   }
 
   private func removeFromSidebars(worktreePath: String) {
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       viewModel.archiveMonitoredSessions(inWorktreePath: worktreePath)
       viewModel.forgetOwnedWorktreePath(worktreePath)
       viewModel.refresh()

@@ -2,8 +2,8 @@
 //  ProviderSegmentedControl.swift
 //  AgentHub
 //
-//  Custom segmented control for switching between Claude and Codex providers.
-//  Always shows both tabs regardless of installation status.
+//  Custom segmented control for switching between Claude, Codex and Antigravity providers.
+//  Always shows all tabs regardless of installation status.
 //
 
 import SwiftUI
@@ -12,23 +12,27 @@ public struct ProviderSegmentedControl: View {
   @Binding var selectedProvider: SessionProviderKind
   let claudeSessionCount: Int
   let codexSessionCount: Int
+  let antigravitySessionCount: Int
 
   public init(
     selectedProvider: Binding<SessionProviderKind>,
     claudeSessionCount: Int,
     codexSessionCount: Int,
+    antigravitySessionCount: Int = 0,
     claudeEnabled: Bool = true,
     codexEnabled: Bool = true
   ) {
     self._selectedProvider = selectedProvider
     self.claudeSessionCount = claudeSessionCount
     self.codexSessionCount = codexSessionCount
+    self.antigravitySessionCount = antigravitySessionCount
   }
 
   public var body: some View {
     UnderlineSegmentedControl(tint: Color.brandPrimary(for: selectedProvider)) {
       segmentButton(for: .claude, count: claudeSessionCount)
       segmentButton(for: .codex, count: codexSessionCount)
+      segmentButton(for: .antigravity, count: antigravitySessionCount)
     }
   }
 
@@ -43,13 +47,13 @@ public struct ProviderSegmentedControl: View {
           Text("(\(count))")
             .font(.secondaryDefault)
         }
-        if provider == .codex {
+        if provider != .claude {
           Text("Beta")
             .font(.secondaryCaption)
-            .foregroundColor(selectedProvider == .codex ? .white : .secondary)
+            .foregroundColor(selectedProvider == provider ? .white : .secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(selectedProvider == .codex ? Color.brandPrimary(for: .codex).opacity(0.8) : Color.gray.opacity(0.2))
+            .background(selectedProvider == provider ? Color.brandPrimary(for: provider).opacity(0.8) : Color.gray.opacity(0.2))
             .clipShape(Capsule())
         }
       }

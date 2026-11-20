@@ -29,12 +29,18 @@ public struct HarnessCapabilityDetector: HarnessCapabilityDetecting {
     for provider: WorktreeLaunchProvider,
     repositoryPath: String?
   ) async -> HarnessCapabilities {
-    let providerDirectory = provider == .claude ? ".claude" : ".codex"
+    let providerDirectory: String
+    switch provider {
+    case .claude: providerDirectory = ".claude"
+    case .codex: providerDirectory = ".codex"
+    case .antigravity: providerDirectory = ".gemini/antigravity-cli"
+    }
     let skills = detectSkills(providerDirectory: providerDirectory)
     let mcpServers: [String]
     switch provider {
     case .claude: mcpServers = detectClaudeMCPServers(repositoryPath: repositoryPath)
     case .codex: mcpServers = detectCodexMCPServers()
+    case .antigravity: mcpServers = detectAntigravityMCPServers()
     }
     return HarnessCapabilities(provider: provider, skills: skills, mcpServers: mcpServers)
   }
@@ -117,6 +123,20 @@ public struct HarnessCapabilityDetector: HarnessCapabilityDetecting {
       names.formUnion(projectMCP.keys)
     }
     return names.sorted()
+  }
+
+  // MARK: - Antigravity MCP servers (~/.gemini/config/mcp_config.json)
+
+  func detectAntigravityMCPServers() -> [String] {
+    let url = homeDirectory
+      .appendingPathComponent(".gemini/config", isDirectory: true)
+      .appendingPathComponent("mcp_config.json", isDirectory: false)
+    guard let data = try? Data(contentsOf: url),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let servers = root["mcpServers"] as? [String: Any] else {
+      return []
+    }
+    return servers.keys.sorted()
   }
 
   // MARK: - Codex MCP servers (~/.codex/config.toml)

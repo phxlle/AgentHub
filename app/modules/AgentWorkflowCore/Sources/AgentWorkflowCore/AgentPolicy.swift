@@ -9,6 +9,7 @@ public struct AgentProviderID: RawRepresentable, Codable, Hashable, Sendable {
 
   public static let codex = AgentProviderID(rawValue: "codex")
   public static let claude = AgentProviderID(rawValue: "claude")
+  public static let antigravity = AgentProviderID(rawValue: "antigravity")
 }
 
 public enum AgentRole: String, Codable, CaseIterable, Sendable {

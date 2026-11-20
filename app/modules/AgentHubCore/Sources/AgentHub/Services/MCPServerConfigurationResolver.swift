@@ -100,13 +100,16 @@ public protocol MCPServerConfigurationResolverProtocol: Sendable {
 public actor DefaultMCPServerConfigurationResolver: MCPServerConfigurationResolverProtocol {
   private let claudeConfigPath: String
   private let codexConfigPath: String
+  private let antigravityConfigPath: String
 
   public init(
     claudeConfigPath: String = "~/.claude.json",
-    codexConfigPath: String = "~/.codex/config.toml"
+    codexConfigPath: String = "~/.codex/config.toml",
+    antigravityConfigPath: String = "~/.gemini/config/mcp_config.json"
   ) {
     self.claudeConfigPath = NSString(string: claudeConfigPath).expandingTildeInPath
     self.codexConfigPath = NSString(string: codexConfigPath).expandingTildeInPath
+    self.antigravityConfigPath = NSString(string: antigravityConfigPath).expandingTildeInPath
   }
 
   public func serverConfigurations(
@@ -118,6 +121,29 @@ public actor DefaultMCPServerConfigurationResolver: MCPServerConfigurationResolv
       claudeServerConfigurations(projectPath: projectPath)
     case .codex:
       codexServerConfigurations(projectPath: projectPath)
+    case .antigravity:
+      antigravityServerConfigurations(projectPath: projectPath)
+    }
+  }
+
+  /// Antigravity keeps one global `mcp_config.json` ({"mcpServers": {name: {command, args, env}}}).
+  private func antigravityServerConfigurations(projectPath: String) -> [MCPServerConfiguration] {
+    guard let data = FileManager.default.contents(atPath: antigravityConfigPath),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let servers = root["mcpServers"] as? [String: Any] else {
+      return []
+    }
+    return servers.keys.sorted().compactMap { name in
+      guard let server = servers[name] as? [String: Any],
+            let command = server["command"] as? String else { return nil }
+      return MCPServerConfiguration(
+        provider: .antigravity,
+        projectPath: projectPath,
+        name: name,
+        command: command,
+        args: server["args"] as? [String] ?? [],
+        env: server["env"] as? [String: String] ?? [:]
+      )
     }
   }
 

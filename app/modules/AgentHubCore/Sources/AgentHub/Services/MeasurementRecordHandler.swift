@@ -33,13 +33,16 @@ enum MeasurementRecordHandlingError: LocalizedError {
 public final class MeasurementRecordHandler: MeasurementRecordHandlingProtocol {
   private let claudeTarget: any MeasurementRecordTarget
   private let codexTarget: any MeasurementRecordTarget
+  private let antigravityTarget: (any MeasurementRecordTarget)?
 
   public init(
     claudeTarget: any MeasurementRecordTarget,
-    codexTarget: any MeasurementRecordTarget
+    codexTarget: any MeasurementRecordTarget,
+    antigravityTarget: (any MeasurementRecordTarget)? = nil
   ) {
     self.claudeTarget = claudeTarget
     self.codexTarget = codexTarget
+    self.antigravityTarget = antigravityTarget
   }
 
   public func handle(_ record: MeasurementRecord) async throws {
@@ -49,6 +52,8 @@ public final class MeasurementRecordHandler: MeasurementRecordHandlingProtocol {
       target = claudeTarget
     case .codex:
       target = codexTarget
+    case .antigravity:
+      target = antigravityTarget ?? claudeTarget
     }
 
     let explicitSessionId = record.sourceSessionId.flatMap { sessionId in

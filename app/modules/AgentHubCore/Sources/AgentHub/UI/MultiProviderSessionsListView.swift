@@ -2,7 +2,7 @@
 //  MultiProviderSessionsListView.swift
 //  AgentHub
 //
-//  Shows Claude and Codex sections side-by-side in the left panel.
+//  Shows Claude, Codex and Antigravity sections side-by-side in the left panel.
 //
 
 import AgentHubGitHub
@@ -133,6 +133,7 @@ struct WorkflowComparisonPresentationState: Equatable {
 public struct MultiProviderSessionsListView: View {
   @Bindable var claudeViewModel: CLISessionsViewModel
   @Bindable var codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
   @Bindable var workspaceViewModel: AgentWorkspacesViewModel
   @Binding var columnVisibility: NavigationSplitViewVisibility
 
@@ -202,6 +203,7 @@ public struct MultiProviderSessionsListView: View {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     workspaceViewModel: AgentWorkspacesViewModel,
     columnVisibility: Binding<NavigationSplitViewVisibility>,
     intelligenceViewModel: IntelligenceViewModel? = nil,
@@ -210,6 +212,7 @@ public struct MultiProviderSessionsListView: View {
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.workspaceViewModel = workspaceViewModel
     self._columnVisibility = columnVisibility
     self.intelligenceViewModel = intelligenceViewModel
@@ -269,6 +272,10 @@ public struct MultiProviderSessionsListView: View {
     .onChange(of: codexViewModel.resolvedPendingSessions) { _, newResolutions in
       handleResolvedSessions(newResolutions, provider: .codex, viewModel: codexViewModel)
     }
+    .onChange(of: antigravityViewModel?.resolvedPendingSessions) { _, newResolutions in
+      guard let antigravityViewModel, let newResolutions else { return }
+      handleResolvedSessions(newResolutions, provider: .antigravity, viewModel: antigravityViewModel)
+    }
     .onChange(of: claudeViewModel.lastCreatedPendingId) { _, newId in
       guard let newId else { return }
       workflowComparisonState.showStandaloneContent()
@@ -282,6 +289,13 @@ public struct MultiProviderSessionsListView: View {
       selectedWorkspaceID = nil
       primarySessionId = Self.pendingItemID(.codex, newId)
       codexViewModel.lastCreatedPendingId = nil
+    }
+    .onChange(of: antigravityViewModel?.lastCreatedPendingId) { _, newId in
+      guard let antigravityViewModel, let newId else { return }
+      workflowComparisonState.showStandaloneContent()
+      selectedWorkspaceID = nil
+      primarySessionId = Self.pendingItemID(.antigravity, newId)
+      antigravityViewModel.lastCreatedPendingId = nil
     }
     .onChange(of: selectedSessionItemIDs) { _, _ in
       consumeGlobalSessionSelectionIfNeeded()
@@ -331,54 +345,35 @@ public struct MultiProviderSessionsListView: View {
       .alert(
         "Failed to Delete Worktree",
         isPresented: Binding(
-          get: {
-            claudeViewModel.worktreeDeletionError != nil
-              || codexViewModel.worktreeDeletionError != nil
-          },
+          get: { worktreeDeletionErrorOwner != nil },
           set: {
             if !$0 {
-              claudeViewModel.clearWorktreeDeletionError()
-              codexViewModel.clearWorktreeDeletionError()
+              clearWorktreeDeletionErrors()
             }
           }
         )
       ) {
-        let error = claudeViewModel.worktreeDeletionError ?? codexViewModel.worktreeDeletionError
-        if let error, error.isOrphaned, let parentRepoPath = error.parentRepoPath {
+        let owner = worktreeDeletionErrorOwner
+        if let owner, owner.error.isOrphaned, let parentRepoPath = owner.error.parentRepoPath {
           Button("Prune & Delete") {
-            let isClaudeError = claudeViewModel.worktreeDeletionError != nil
-            if isClaudeError {
-              codexViewModel.clearWorktreeDeletionError()
-              claudeViewModel.forceDeleteOrphanedWorktree(
-                error.worktree, parentRepoPath: parentRepoPath)
-            } else {
-              claudeViewModel.clearWorktreeDeletionError()
-              codexViewModel.forceDeleteOrphanedWorktree(
-                error.worktree, parentRepoPath: parentRepoPath)
-            }
+            clearWorktreeDeletionErrors(except: owner.viewModel)
+            owner.viewModel.forceDeleteOrphanedWorktree(
+              owner.error.worktree, parentRepoPath: parentRepoPath)
           }
           Button("Cancel", role: .cancel) {
-            claudeViewModel.clearWorktreeDeletionError()
-            codexViewModel.clearWorktreeDeletionError()
+            clearWorktreeDeletionErrors()
           }
-        } else if let error {
+        } else if let owner {
           Button("Force Delete", role: .destructive) {
-            let isClaudeError = claudeViewModel.worktreeDeletionError != nil
-            if isClaudeError {
-              codexViewModel.clearWorktreeDeletionError()
-              claudeViewModel.forceDeleteWorktree(error.worktree)
-            } else {
-              claudeViewModel.clearWorktreeDeletionError()
-              codexViewModel.forceDeleteWorktree(error.worktree)
-            }
+            clearWorktreeDeletionErrors(except: owner.viewModel)
+            owner.viewModel.forceDeleteWorktree(owner.error.worktree)
           }
           Button("Cancel", role: .cancel) {
-            claudeViewModel.clearWorktreeDeletionError()
-            codexViewModel.clearWorktreeDeletionError()
+            clearWorktreeDeletionErrors()
           }
         }
       } message: {
-        let error = claudeViewModel.worktreeDeletionError ?? codexViewModel.worktreeDeletionError
+        let error = worktreeDeletionErrorOwner?.error
         if let error {
           if error.isOrphaned, let parentRepoPath = error.parentRepoPath {
             Text(
@@ -499,6 +494,7 @@ public struct MultiProviderSessionsListView: View {
           displayName: item.displayName,
           claudeViewModel: claudeViewModel,
           codexViewModel: codexViewModel,
+          antigravityViewModel: antigravityViewModel,
           contextProfileService: agentHub?.contextProfileService,
           onDismiss: { projectDetailsSheetItem = nil },
           onSelectSession: { sessionItem in
@@ -543,6 +539,7 @@ public struct MultiProviderSessionsListView: View {
           MultiProviderMonitoringPanelView(
             claudeViewModel: claudeViewModel,
             codexViewModel: codexViewModel,
+            antigravityViewModel: antigravityViewModel,
             primarySessionId: $primarySessionId,
             workflowComparison: workflowComparisonBinding,
             selectedModuleLandingPath: $selectedModuleLandingPath,
@@ -981,6 +978,14 @@ public struct MultiProviderSessionsListView: View {
     for session in codexViewModel.monitoredCLISessions {
       entries.append((Self.monitoredItemID(.codex, session.id), session.lastActivityAt))
     }
+    if let antigravityViewModel {
+      for pending in antigravityViewModel.pendingHubSessions {
+        entries.append((Self.pendingItemID(.antigravity, pending.id), pending.startedAt))
+      }
+      for session in antigravityViewModel.monitoredCLISessions {
+        entries.append((Self.monitoredItemID(.antigravity, session.id), session.lastActivityAt))
+      }
+    }
 
     return entries.sorted { $0.timestamp > $1.timestamp }.map(\.id)
   }
@@ -1059,6 +1064,44 @@ public struct MultiProviderSessionsListView: View {
         ))
     }
 
+    if let antigravityViewModel {
+      let antigravityReviewReferences =
+        agentHub?.gitHubReviewsViewModel.linkedPullRequestReferencesByItemID(provider: .antigravity)
+        ?? [:]
+
+      for pending in antigravityViewModel.pendingHubSessions {
+        let itemID = Self.pendingItemID(.antigravity, pending.id)
+        results.append(
+          SelectedSessionItem(
+            id: itemID,
+            session: pending.placeholderSession,
+            providerKind: .antigravity,
+            timestamp: pending.startedAt,
+            isPending: true,
+            sessionStatus: nil,
+            linkedPullRequests: antigravityReviewReferences[itemID] ?? [],
+            pendingID: pending.id
+          ))
+      }
+
+      for session in antigravityViewModel.monitoredCLISessions {
+        let itemID = Self.monitoredItemID(.antigravity, session.id)
+        results.append(
+          SelectedSessionItem(
+            id: itemID,
+            session: session,
+            providerKind: .antigravity,
+            timestamp: session.lastActivityAt,
+            isPending: false,
+            sessionStatus: antigravityViewModel.sessionStatus(for: session.id),
+            linkedPullRequests: mergedPullRequestReferences(
+              antigravityViewModel.pullRequestReferences(for: session.id),
+              antigravityReviewReferences[itemID] ?? []
+            )
+          ))
+      }
+    }
+
     return results.sorted { $0.timestamp > $1.timestamp }
   }
 
@@ -1074,16 +1117,18 @@ public struct MultiProviderSessionsListView: View {
     switch item.providerKind {
     case .claude: return claudeViewModel.sessionCustomNames[item.session.id]
     case .codex: return codexViewModel.sessionCustomNames[item.session.id]
+    case .antigravity: return antigravityViewModel?.sessionCustomNames[item.session.id]
     }
   }
 
   // MARK: - Project Grouping
 
   /// Deduplicated tracked repos from both providers, preserving insertion order,
-  /// newest-first. Claude's repos are walked first, then Codex-only repos.
+  /// newest-first. Claude's repos are walked first, then Codex-only repos, then Antigravity-only.
   private var orderedTrackedRepos: [SelectedRepository] {
     let combined = WorktreeModuleResolver.mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     )
     // Newest-added first (reverse of insertion order).
     return combined.reversed()
@@ -1091,7 +1136,9 @@ public struct MultiProviderSessionsListView: View {
 
   private var orderedSelectedFolderPaths: [String] {
     var seen: Set<String> = []
-    let combined = claudeViewModel.selectedFolderPaths + codexViewModel.selectedFolderPaths
+    let combined =
+      claudeViewModel.selectedFolderPaths + codexViewModel.selectedFolderPaths
+      + (antigravityViewModel?.selectedFolderPaths ?? [])
     return combined.reversed().compactMap { path in
       let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(path)
       return seen.insert(normalizedPath).inserted ? normalizedPath : nil
@@ -1105,7 +1152,8 @@ public struct MultiProviderSessionsListView: View {
   private var pinnedSessionSnapshot: ProviderScopedPinnedSessions {
     ProviderScopedPinnedSessions(
       claudeSessionIds: claudeViewModel.pinnedSessionIds,
-      codexSessionIds: codexViewModel.pinnedSessionIds
+      codexSessionIds: codexViewModel.pinnedSessionIds,
+      antigravitySessionIds: antigravityViewModel?.pinnedSessionIds ?? []
     )
   }
 
@@ -1276,6 +1324,12 @@ public struct MultiProviderSessionsListView: View {
           {
             codexViewModel.removeRepository(repo)
           }
+          if let antigravityViewModel,
+            let repo = selectedRepository(
+              in: antigravityViewModel.selectedRepositories, matching: group.id)
+          {
+            antigravityViewModel.removeRepository(repo)
+          }
         }
       }
     }
@@ -1319,6 +1373,7 @@ public struct MultiProviderSessionsListView: View {
       }
       claudeViewModel.removeFolder(at: section.id)
       codexViewModel.removeFolder(at: section.id)
+      antigravityViewModel?.removeFolder(at: section.id)
     }
   }
 
@@ -1374,6 +1429,11 @@ public struct MultiProviderSessionsListView: View {
     if repositories(codexViewModel.selectedRepositories, containWorktreePath: worktree.path) {
       return .codex
     }
+    if let antigravityViewModel,
+      repositories(antigravityViewModel.selectedRepositories, containWorktreePath: worktree.path)
+    {
+      return .antigravity
+    }
     return .claude
   }
 
@@ -1406,12 +1466,13 @@ public struct MultiProviderSessionsListView: View {
     }
     claudeViewModel.removeFocusedWorktree(at: path)
     codexViewModel.removeFocusedWorktree(at: path)
+    antigravityViewModel?.removeFocusedWorktree(at: path)
   }
 
   private func deleteWorktreeModule(_ confirmation: WorktreeModuleDeleteConfirmation) {
     worktreeModuleDeleteConfirmation = nil
     Task { @MainActor in
-      let viewModel = confirmation.providerKind == .claude ? claudeViewModel : codexViewModel
+      let viewModel = sessionsViewModel(for: confirmation.providerKind)
       let succeeded = await viewModel.deleteWorktree(confirmation.worktree)
       if succeeded {
         removeWorktreeModuleFocus(confirmation.worktree)
@@ -1986,6 +2047,7 @@ public struct MultiProviderSessionsListView: View {
               switch item.providerKind {
               case .claude: claudeViewModel.togglePin(for: item.session)
               case .codex: codexViewModel.togglePin(for: item.session)
+              case .antigravity: antigravityViewModel?.togglePin(for: item.session)
               }
             }
           },
@@ -2041,9 +2103,8 @@ public struct MultiProviderSessionsListView: View {
 
   @ViewBuilder
   private var selectedProviderContent: some View {
-    let isClaudeSelected = selectedProvider == .claude
-    let viewModel = isClaudeSelected ? claudeViewModel : codexViewModel
-    let isInstalled = isClaudeSelected ? claudeInstalled : codexInstalled
+    let viewModel = currentViewModel
+    let isInstalled = CLIDetectionService.isInstalled(selectedProvider)
 
     if !isInstalled {
       CLINotInstalledView(provider: selectedProvider)
@@ -2093,7 +2154,7 @@ public struct MultiProviderSessionsListView: View {
       .help("About Browse all Sessions")
       .popover(isPresented: $showBrowseInfo, arrowEdge: isBrowseExpanded ? .bottom : .top) {
         Text(
-          "Find all local Claude and Codex sessions started from the terminal and bring them into AgentHub."
+          "Find all local Claude, Codex and Antigravity sessions started from the terminal and bring them into AgentHub."
         )
         .font(.callout)
         .foregroundColor(.secondary)
@@ -2112,6 +2173,7 @@ public struct MultiProviderSessionsListView: View {
     if willExpand {
       claudeViewModel.ensureBrowseSessionsLoaded()
       codexViewModel.ensureBrowseSessionsLoaded()
+      antigravityViewModel?.ensureBrowseSessionsLoaded()
     }
   }
 
@@ -2124,7 +2186,8 @@ public struct MultiProviderSessionsListView: View {
           set: { selectedProviderRaw = $0.rawValue }
         ),
         claudeSessionCount: claudeViewModel.totalSessionCount,
-        codexSessionCount: codexViewModel.totalSessionCount
+        codexSessionCount: codexViewModel.totalSessionCount,
+        antigravitySessionCount: antigravityViewModel?.totalSessionCount ?? 0
       )
 
       if hasCurrentProviderRepositories {
@@ -2303,6 +2366,7 @@ public struct MultiProviderSessionsListView: View {
     trackPendingModule(path)
     claudeViewModel.addFolder(at: path)
     codexViewModel.addFolder(at: path)
+    antigravityViewModel?.addFolder(at: path)
   }
 
   private func openSessionFile(for session: CLISession, viewModel: CLISessionsViewModel) {
@@ -2327,9 +2391,10 @@ public struct MultiProviderSessionsListView: View {
   ) {
     workflowComparisonState.showStandaloneContent()
     viewModel.selectSearchResult(result)
-    let otherViewModel = viewModel.providerKind == .claude ? codexViewModel : claudeViewModel
-    if !otherViewModel.selectedRepositories.contains(where: { $0.path == result.projectPath }) {
-      otherViewModel.addRepository(at: result.projectPath)
+    for otherViewModel in allSessionViewModels where otherViewModel !== viewModel {
+      if !otherViewModel.selectedRepositories.contains(where: { $0.path == result.projectPath }) {
+        otherViewModel.addRepository(at: result.projectPath)
+      }
     }
   }
 
@@ -2337,6 +2402,28 @@ public struct MultiProviderSessionsListView: View {
     switch provider {
     case .claude: return claudeViewModel
     case .codex: return codexViewModel
+    case .antigravity: return antigravityViewModel ?? claudeViewModel
+    }
+  }
+
+  private var allSessionViewModels: [CLISessionsViewModel] {
+    [claudeViewModel, codexViewModel] + (antigravityViewModel.map { [$0] } ?? [])
+  }
+
+  private var worktreeDeletionErrorOwner:
+    (viewModel: CLISessionsViewModel, error: CLISessionsViewModel.WorktreeDeletionError)?
+  {
+    for viewModel in allSessionViewModels {
+      if let error = viewModel.worktreeDeletionError {
+        return (viewModel, error)
+      }
+    }
+    return nil
+  }
+
+  private func clearWorktreeDeletionErrors(except kept: CLISessionsViewModel? = nil) {
+    for viewModel in allSessionViewModels where viewModel !== kept {
+      viewModel.clearWorktreeDeletionError()
     }
   }
 
@@ -2385,7 +2472,7 @@ public struct MultiProviderSessionsListView: View {
   }
 
   private var currentViewModel: CLISessionsViewModel {
-    selectedProvider == .claude ? claudeViewModel : codexViewModel
+    viewModel(for: selectedProvider)
   }
 
   private var gitHubPRObservationService: (any GitHubPRObservationServiceProtocol)? {
@@ -2429,7 +2516,8 @@ public struct MultiProviderSessionsListView: View {
   private var canRefreshGitHubStates: Bool {
     gitHubPRObservationService != nil
       && !(claudeViewModel.monitoredSessionIds.isEmpty
-        && codexViewModel.monitoredSessionIds.isEmpty)
+        && codexViewModel.monitoredSessionIds.isEmpty
+        && (antigravityViewModel?.monitoredSessionIds.isEmpty ?? true))
   }
 
   private var hasCurrentProviderRepositories: Bool {
@@ -2537,16 +2625,15 @@ public struct MultiProviderSessionsListView: View {
       return
     }
 
-    let viewModel = request.providerKind == .claude ? claudeViewModel : codexViewModel
+    let viewModel = sessionsViewModel(for: request.providerKind)
     if let session = request.session,
       session.id == request.sessionId,
       !viewModel.isMonitoring(sessionId: session.id)
     {
       viewModel.startMonitoring(session: session)
     }
-    if request.providerKind == .codex {
-      viewModel.ensureLiveMonitoring(sessionId: request.sessionId)
-    }
+    // No-op for providers without live polling (the view model guards on its own kind).
+    viewModel.ensureLiveMonitoring(sessionId: request.sessionId)
 
     guard let item = selectedSessionItems.first(where: { $0.id == request.itemId }) else {
       return
@@ -2594,13 +2681,11 @@ public struct MultiProviderSessionsListView: View {
     }
 
     for target in [request.implementation, request.review] {
-      let viewModel = target.providerKind == .claude ? claudeViewModel : codexViewModel
+      let viewModel = sessionsViewModel(for: target.providerKind)
       if !viewModel.isMonitoring(sessionId: target.session.id) {
         viewModel.startMonitoring(session: target.session)
       }
-      if target.providerKind == .codex {
-        viewModel.ensureLiveMonitoring(sessionId: target.session.id)
-      }
+      viewModel.ensureLiveMonitoring(sessionId: target.session.id)
     }
 
     let availableIDs = Set(selectedSessionItems.map(\.id))
@@ -2704,14 +2789,6 @@ public struct MultiProviderSessionsListView: View {
 
   // MARK: - Computed
 
-  private var claudeInstalled: Bool {
-    CLIDetectionService.isClaudeInstalled()
-  }
-
-  private var codexInstalled: Bool {
-    CLIDetectionService.isCodexInstalled()
-  }
-
   private var hasRepositories: Bool {
     !allRepositories.isEmpty
   }
@@ -2719,11 +2796,13 @@ public struct MultiProviderSessionsListView: View {
   private var allRepositories: [SelectedRepository] {
     WorktreeModuleResolver.mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     ).sorted { $0.path < $1.path }
   }
 
   private var totalSessionCount: Int {
     claudeViewModel.totalSessionCount + codexViewModel.totalSessionCount
+      + (antigravityViewModel?.totalSessionCount ?? 0)
   }
 
   private func displayModuleCount(for viewModel: CLISessionsViewModel) -> Int {
@@ -2822,6 +2901,7 @@ public struct MultiProviderSessionsListView: View {
     MultiSessionLaunchViewModel(
       claudeViewModel: claudeViewModel,
       codexViewModel: codexViewModel,
+      antigravityViewModel: antigravityViewModel,
       intelligenceViewModel: intelligenceViewModel,
       worktreeBranchNamingService: worktreeBranchNamingService,
       worktreeSuccessSoundService: worktreeSuccessSoundService,
@@ -2913,7 +2993,7 @@ public struct MultiProviderSessionsListView: View {
     inputText: String,
     providerKind: SessionProviderKind
   ) {
-    let viewModel = providerKind == .claude ? claudeViewModel : codexViewModel
+    let viewModel = sessionsViewModel(for: providerKind)
     let target = GitHubReviewSessionLaunchTargetResolver.launchTarget(
       for: projectPath,
       repositories: Array(orderedTrackedRepos)
@@ -3051,7 +3131,7 @@ public struct MultiProviderSessionsListView: View {
   }
 
   private func sessionsViewModel(for provider: SessionProviderKind) -> CLISessionsViewModel {
-    provider == .claude ? claudeViewModel : codexViewModel
+    viewModel(for: provider)
   }
 
   /// Scrolls the sidebar to the session currently open in the detail view.

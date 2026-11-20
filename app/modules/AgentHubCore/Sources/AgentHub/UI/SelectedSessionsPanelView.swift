@@ -173,6 +173,7 @@ public struct SelectedSessionsPanelView: View {
 public struct MultiProviderSelectedSessionsPanelView: View {
   @Bindable var claudeViewModel: CLISessionsViewModel
   @Bindable var codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
   @Binding var primarySessionId: String?
   @AppStorage(AgentHubDefaults.worktreeDisplayMode)
   private var worktreeDisplayModeRawValue: String = WorktreeDisplayMode.parent.rawValue
@@ -180,10 +181,12 @@ public struct MultiProviderSelectedSessionsPanelView: View {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     primarySessionId: Binding<String?>
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self._primarySessionId = primarySessionId
   }
 
@@ -322,6 +325,30 @@ public struct MultiProviderSelectedSessionsPanelView: View {
       ))
     }
 
+    if let antigravityViewModel {
+      for pending in antigravityViewModel.pendingHubSessions {
+        results.append(SelectedSessionItem(
+          id: "pending-antigravity-\(pending.id.uuidString)",
+          session: pending.placeholderSession,
+          providerKind: .antigravity,
+          timestamp: pending.startedAt,
+          modulePath: findModulePath(for: pending.projectPath),
+          isPending: true
+        ))
+      }
+
+      for item in antigravityViewModel.monitoredSessions {
+        results.append(SelectedSessionItem(
+          id: "antigravity-\(item.session.id)",
+          session: item.session,
+          providerKind: .antigravity,
+          timestamp: item.session.lastActivityAt,
+          modulePath: findModulePath(for: item.session.projectPath),
+          isPending: false
+        ))
+      }
+    }
+
     return results.sorted { $0.timestamp > $1.timestamp }
   }
 
@@ -334,6 +361,7 @@ public struct MultiProviderSelectedSessionsPanelView: View {
   private var allSelectedRepositories: [SelectedRepository] {
     WorktreeModuleResolver.mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     ).sorted { $0.path < $1.path }
   }
 
@@ -355,6 +383,8 @@ public struct MultiProviderSelectedSessionsPanelView: View {
       return claudeViewModel.sessionCustomNames[item.session.id]
     case .codex:
       return codexViewModel.sessionCustomNames[item.session.id]
+    case .antigravity:
+      return antigravityViewModel?.sessionCustomNames[item.session.id]
     }
   }
 

@@ -16,14 +16,20 @@ import SwiftUI
 public struct SessionsBrowserPanel: View {
   @Bindable var claudeViewModel: CLISessionsViewModel
   @Bindable var codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
 
   @Environment(\.colorScheme) private var colorScheme
   @AppStorage(AgentHubDefaults.worktreeDisplayMode)
   private var worktreeDisplayModeRawValue: String = WorktreeDisplayMode.parent.rawValue
 
-  public init(claudeViewModel: CLISessionsViewModel, codexViewModel: CLISessionsViewModel) {
+  public init(
+    claudeViewModel: CLISessionsViewModel,
+    codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil
+  ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
   }
 
   public var body: some View {
@@ -189,7 +195,18 @@ public struct SessionsBrowserPanel: View {
     let codexMonitored = codexViewModel.monitoredSessions.map {
       ProviderMonitoringItem.monitored(provider: .codex, viewModel: codexViewModel, session: $0.session, state: $0.state)
     }
-    return claudePending + codexPending + claudeMonitored + codexMonitored
+    let antigravityPending = antigravityViewModel.map { viewModel in
+      viewModel.pendingHubSessions.map {
+        ProviderMonitoringItem.pending(provider: .antigravity, viewModel: viewModel, pending: $0)
+      }
+    } ?? []
+    let antigravityMonitored = antigravityViewModel.map { viewModel in
+      viewModel.monitoredSessions.map {
+        ProviderMonitoringItem.monitored(provider: .antigravity, viewModel: viewModel, session: $0.session, state: $0.state)
+      }
+    } ?? []
+    return claudePending + codexPending + antigravityPending
+      + claudeMonitored + codexMonitored + antigravityMonitored
   }
 
   private var groupedByRepository: [SidebarRepositoryModuleSection<ProviderMonitoringItem>] {
@@ -216,6 +233,7 @@ public struct SessionsBrowserPanel: View {
   private var allSelectedRepositories: [SelectedRepository] {
     WorktreeModuleResolver.mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     ).sorted { $0.path < $1.path }
   }
 

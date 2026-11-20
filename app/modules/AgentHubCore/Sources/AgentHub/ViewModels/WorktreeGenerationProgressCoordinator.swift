@@ -473,6 +473,7 @@ public final class WorktreeGenerationProgressCoordinator {
     switch provider {
     case .claude: return .claude
     case .codex: return .codex
+    case .antigravity: return .antigravity
     }
   }
 }

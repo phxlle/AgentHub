@@ -33,13 +33,16 @@ enum StudioArtifactHandlingError: LocalizedError {
 public final class StudioArtifactHandler: StudioArtifactHandlingProtocol {
   private let claudeTarget: any StudioArtifactTarget
   private let codexTarget: any StudioArtifactTarget
+  private let antigravityTarget: (any StudioArtifactTarget)?
 
   public init(
     claudeTarget: any StudioArtifactTarget,
-    codexTarget: any StudioArtifactTarget
+    codexTarget: any StudioArtifactTarget,
+    antigravityTarget: (any StudioArtifactTarget)? = nil
   ) {
     self.claudeTarget = claudeTarget
     self.codexTarget = codexTarget
+    self.antigravityTarget = antigravityTarget
   }
 
   public func handle(_ artifact: StudioArtifact) async throws {
@@ -49,6 +52,8 @@ public final class StudioArtifactHandler: StudioArtifactHandlingProtocol {
       target = claudeTarget
     case .codex:
       target = codexTarget
+    case .antigravity:
+      target = antigravityTarget ?? claudeTarget
     }
 
     let explicitSessionId = artifact.sourceSessionId.flatMap { sessionId in

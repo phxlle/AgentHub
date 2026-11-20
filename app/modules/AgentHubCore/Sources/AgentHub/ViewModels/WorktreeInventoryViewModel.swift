@@ -31,19 +31,23 @@ final class WorktreeInventoryViewModel {
     claudeRepositories: [SelectedRepository],
     codexRepositories: [SelectedRepository],
     claudeMonitoredSessions: [CLISession],
-    codexMonitoredSessions: [CLISession]
+    codexMonitoredSessions: [CLISession],
+    antigravityRepositories: [SelectedRepository] = [],
+    antigravityMonitoredSessions: [CLISession] = []
   ) async {
     snapshot = makeSnapshot(
       claudeRepositories: claudeRepositories,
       codexRepositories: codexRepositories,
       claudeMonitoredSessions: claudeMonitoredSessions,
-      codexMonitoredSessions: codexMonitoredSessions
+      codexMonitoredSessions: codexMonitoredSessions,
+      antigravityRepositories: antigravityRepositories,
+      antigravityMonitoredSessions: antigravityMonitoredSessions
     )
     snapshot = applyDiskSizes(to: snapshot)
 
     let repositoryPaths = Self.repositoryPaths(
       claudeRepositories: claudeRepositories,
-      codexRepositories: codexRepositories
+      codexRepositories: codexRepositories + antigravityRepositories
     )
     guard !repositoryPaths.isEmpty else {
       isLoading = false
@@ -91,6 +95,8 @@ final class WorktreeInventoryViewModel {
       codexRepositories: codexRepositories,
       claudeMonitoredSessions: claudeMonitoredSessions,
       codexMonitoredSessions: codexMonitoredSessions,
+      antigravityRepositories: antigravityRepositories,
+      antigravityMonitoredSessions: antigravityMonitoredSessions,
       discoveredWorktreesByRepositoryPath: loadResult.0
     )
     snapshot = applyDiskSizes(to: snapshot)
@@ -185,6 +191,8 @@ final class WorktreeInventoryViewModel {
     codexRepositories: [SelectedRepository],
     claudeMonitoredSessions: [CLISession],
     codexMonitoredSessions: [CLISession],
+    antigravityRepositories: [SelectedRepository] = [],
+    antigravityMonitoredSessions: [CLISession] = [],
     discoveredWorktreesByRepositoryPath: [String: [GitWorktreeInventoryItem]] = [:]
   ) -> WorktreeSettingsSnapshot {
     filteredSnapshot(
@@ -193,6 +201,8 @@ final class WorktreeInventoryViewModel {
         codexRepositories: codexRepositories,
         claudeMonitoredSessions: claudeMonitoredSessions,
         codexMonitoredSessions: codexMonitoredSessions,
+        antigravityRepositories: antigravityRepositories,
+        antigravityMonitoredSessions: antigravityMonitoredSessions,
         discoveredWorktreesByRepositoryPath: discoveredWorktreesByRepositoryPath
       )
     )

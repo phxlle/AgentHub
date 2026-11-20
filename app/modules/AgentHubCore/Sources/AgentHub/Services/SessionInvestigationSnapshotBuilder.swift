@@ -10,10 +10,12 @@ public enum SessionInvestigationSnapshotBuilder {
   public static func make(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     generatedAt: Date = Date()
   ) -> SessionInvestigationSnapshot {
     let repositories = mergedRepositories(
       claudeViewModel.selectedRepositories + codexViewModel.selectedRepositories
+        + (antigravityViewModel?.selectedRepositories ?? [])
     )
 
     let repositorySnapshots = repositories.map { repository in
@@ -49,12 +51,21 @@ public enum SessionInvestigationSnapshotBuilder {
       provider: .codex,
       customNames: codexViewModel.sessionCustomNames,
       repositories: repositories
-    )
+    ) + (antigravityViewModel.map {
+      makeSessionSnapshots(
+        viewModel: $0,
+        provider: .antigravity,
+        customNames: $0.sessionCustomNames,
+        repositories: repositories
+      )
+    } ?? [])
 
     let pendingSnapshots = claudeViewModel.pendingHubSessions.map {
       makePendingSessionSnapshot($0, provider: .claude)
     } + codexViewModel.pendingHubSessions.map {
       makePendingSessionSnapshot($0, provider: .codex)
+    } + (antigravityViewModel?.pendingHubSessions ?? []).map {
+      makePendingSessionSnapshot($0, provider: .antigravity)
     }
 
     return SessionInvestigationSnapshot(

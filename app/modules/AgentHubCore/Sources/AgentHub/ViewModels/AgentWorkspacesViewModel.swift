@@ -234,7 +234,7 @@ public final class AgentWorkspacesViewModel {
     }
     surface.workspaceCLIConfigurationProvider = { [weak self] provider in
       self?.sessionCoordinator.cliConfiguration(for: provider)
-        ?? (provider == .claude ? .claudeDefault : .codexDefault)
+        ?? CLICommandConfiguration.default(for: provider)
     }
     let initialWorkingDirectory = snapshot.panels
       .first(where: { $0.role == .primary })?

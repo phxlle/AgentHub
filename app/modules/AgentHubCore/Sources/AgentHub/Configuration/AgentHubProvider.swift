@@ -67,6 +67,10 @@ public final class AgentHubProvider {
   public private(set) lazy var codexMonitorService: CodexSessionMonitorService = .init(
     codexDataPath: configuration.codexDataPath, metadataStore: metadataStore)
 
+  /// Monitor service for tracking Antigravity conversations
+  public private(set) lazy var antigravityMonitorService: AntigravitySessionMonitorService = .init(
+    antigravityDataPath: configuration.antigravityDataPath, metadataStore: metadataStore)
+
   /// Git worktree service for branch/worktree operations
   public private(set) lazy var gitService: GitWorktreeService = .init()
 
@@ -85,6 +89,14 @@ public final class AgentHubProvider {
   /// Codex file watcher for real-time monitoring
   private lazy var codexFileWatcher: CodexSessionFileWatcher = .init(
     codexPath: configuration.codexDataPath)
+
+  /// Global stats service for Antigravity usage metrics
+  public private(set) lazy var antigravityStatsService: AntigravityGlobalStatsService = .init(
+    antigravityDataPath: configuration.antigravityDataPath)
+
+  /// Antigravity transcript watcher for real-time monitoring
+  private lazy var antigravityFileWatcher: AntigravitySessionFileWatcher = .init(
+    antigravityDataPath: configuration.antigravityDataPath)
 
   /// Claude file watcher for real-time monitoring. Wired to the approval hook
   /// sidecar so pending-approval state can be surfaced while Claude Code CLI
@@ -119,6 +131,10 @@ public final class AgentHubProvider {
   /// Codex search service
   private lazy var codexSearchService: CodexSearchService = .init(
     codexDataPath: configuration.codexDataPath)
+
+  /// Antigravity search service
+  private lazy var antigravitySearchService: AntigravitySearchService = .init(
+    antigravityDataPath: configuration.antigravityDataPath)
 
   /// Display settings for stats visualization
   public private(set) lazy var displaySettings: StatsDisplaySettings = .init(
@@ -207,19 +223,22 @@ public final class AgentHubProvider {
   public private(set) lazy var worktreeLaunchRequestHandler:
     any WorktreeLaunchRequestHandlingProtocol = WorktreeLaunchRequestHandler(
       claudeViewModel: claudeSessionsViewModel,
-      codexViewModel: codexSessionsViewModel
+      codexViewModel: codexSessionsViewModel,
+      antigravityViewModel: antigravitySessionsViewModel
     )
 
   public private(set) lazy var worktreeDeletionRequestHandler:
     any WorktreeDeletionRequestHandlingProtocol = WorktreeDeletionRequestHandler(
       claudeViewModel: claudeSessionsViewModel,
-      codexViewModel: codexSessionsViewModel
+      codexViewModel: codexSessionsViewModel,
+      antigravityViewModel: antigravitySessionsViewModel
     )
 
   public private(set) lazy var sessionNameRequestHandler: any SessionNameRequestHandlingProtocol =
     SessionNameRequestHandler(
       claudeTarget: claudeSessionsViewModel,
-      codexTarget: codexSessionsViewModel
+      codexTarget: codexSessionsViewModel,
+      antigravityTarget: antigravitySessionsViewModel
     )
 
   /// Watches measurement records written by the bundled `agenthub` MCP server.
@@ -227,7 +246,8 @@ public final class AgentHubProvider {
 
   public private(set) lazy var measurementRecordHandler: any MeasurementRecordHandlingProtocol = MeasurementRecordHandler(
     claudeTarget: claudeSessionsViewModel,
-    codexTarget: codexSessionsViewModel
+    codexTarget: codexSessionsViewModel,
+    antigravityTarget: antigravitySessionsViewModel
   )
 
   /// Studio artifacts for every project, shared by both provider view models.
@@ -249,7 +269,8 @@ public final class AgentHubProvider {
 
   public private(set) lazy var studioArtifactHandler: any StudioArtifactHandlingProtocol = StudioArtifactHandler(
     claudeTarget: claudeSessionsViewModel,
-    codexTarget: codexSessionsViewModel
+    codexTarget: codexSessionsViewModel,
+    antigravityTarget: antigravitySessionsViewModel
   )
 
   /// Watches the worktree-progress sidecar directory the `agenthub` CLI writes
@@ -313,7 +334,7 @@ public final class AgentHubProvider {
   public func openWorkflowSessionComparison(_ request: WorkflowSessionComparisonRequest) {
     for target in [request.implementation, request.review] {
       let viewModel =
-        target.providerKind == .claude ? claudeSessionsViewModel : codexSessionsViewModel
+        sessionsViewModel(for: target.providerKind)
       if !viewModel.isMonitoring(sessionId: target.session.id) {
         viewModel.startMonitoring(session: target.session)
       }
@@ -348,12 +369,14 @@ public final class AgentHubProvider {
     VoiceSessionTargetResolver = .init(
       claudeViewModel: claudeSessionsViewModel,
       codexViewModel: codexSessionsViewModel,
+      antigravityViewModel: antigravitySessionsViewModel,
       selectionRouter: globalSessionSelectionRouter
     )
 
   public private(set) lazy var voiceToolExecutor: VoiceAgentToolExecutor = .init(
     claudeViewModel: claudeSessionsViewModel,
     codexViewModel: codexSessionsViewModel,
+    antigravityViewModel: antigravitySessionsViewModel,
     selectionRouter: globalSessionSelectionRouter,
     targetResolver: voiceSessionTargetResolver
   )
@@ -392,6 +415,19 @@ public final class AgentHubProvider {
   public private(set) lazy var codexSessionsViewModel: CLISessionsViewModel = makeSessionsViewModel(
     providerKind: .codex)
 
+  /// Antigravity sessions view model - created lazily and cached
+  public private(set) lazy var antigravitySessionsViewModel: CLISessionsViewModel =
+    makeSessionsViewModel(providerKind: .antigravity)
+
+  /// Sessions view model for a provider.
+  public func sessionsViewModel(for provider: SessionProviderKind) -> CLISessionsViewModel {
+    switch provider {
+    case .claude: return claudeSessionsViewModel
+    case .codex: return codexSessionsViewModel
+    case .antigravity: return antigravitySessionsViewModel
+    }
+  }
+
   /// Live workflow projection derived from the real Claude and Codex sessions.
   public private(set) lazy var workflowDashboardViewModel: AgentWorkflowDashboardViewModel = {
     do {
@@ -399,6 +435,7 @@ public final class AgentHubProvider {
         runtime: try AgentWorkflowRuntime(),
         claudeSessionsViewModel: claudeSessionsViewModel,
         codexSessionsViewModel: codexSessionsViewModel,
+        antigravitySessionsViewModel: antigravitySessionsViewModel,
         gitHubService: gitHubService
       )
     } catch {
@@ -407,6 +444,7 @@ public final class AgentHubProvider {
         startupError: "Could not open workflow storage: \(error.localizedDescription)",
         claudeSessionsViewModel: claudeSessionsViewModel,
         codexSessionsViewModel: codexSessionsViewModel,
+        antigravitySessionsViewModel: antigravitySessionsViewModel,
         gitHubService: gitHubService
       )
     }
@@ -444,7 +482,8 @@ public final class AgentHubProvider {
   public private(set) lazy var agentWorkspaceSessionCoordinator:
     any AgentWorkspaceSessionCoordinating = AgentWorkspaceSessionCoordinator(
       claudeViewModel: claudeSessionsViewModel,
-      codexViewModel: codexSessionsViewModel
+      codexViewModel: codexSessionsViewModel,
+      antigravityViewModel: antigravitySessionsViewModel
     )
 
   /// Provider-neutral, lazily mounted Ghostty workspaces.
@@ -456,7 +495,8 @@ public final class AgentHubProvider {
       sessionCoordinator: agentWorkspaceSessionCoordinator,
       detectionService: AccessorySessionDetectionService(
         claudeDataPath: configuration.claudeDataPath,
-        codexDataPath: configuration.codexDataPath
+        codexDataPath: configuration.codexDataPath,
+        antigravityDataPath: configuration.antigravityDataPath
       )
     )
 
@@ -546,6 +586,14 @@ public final class AgentHubProvider {
     } else if defaults.string(forKey: AgentHubDefaults.codexCommand) == nil {
       defaults.set("codex", forKey: AgentHubDefaults.codexCommand)
     }
+
+    // Antigravity command: same logic
+    if configuration.antigravityCommand != "agy" {
+      defaults.set(configuration.antigravityCommand, forKey: AgentHubDefaults.antigravityCommand)
+      defaults.set(true, forKey: AgentHubDefaults.antigravityCommandLockedByDeveloper)
+    } else if defaults.string(forKey: AgentHubDefaults.antigravityCommand) == nil {
+      defaults.set("agy", forKey: AgentHubDefaults.antigravityCommand)
+    }
   }
 
   /// Creates a provider with default configuration
@@ -606,12 +654,24 @@ public final class AgentHubProvider {
         mode: .codex,
         extraArgs: CLICommandConfiguration.parseArgumentString(codexArgString)
       )
+    case .antigravity:
+      let userCommand =
+        defaults.string(forKey: AgentHubDefaults.antigravityCommand) ?? configuration.antigravityCommand
+      let argString = defaults.string(forKey: AgentHubDefaults.antigravityCommandArgs) ?? ""
+      cliConfiguration = CLICommandConfiguration(
+        command: userCommand,
+        additionalPaths: CLIPathResolver.antigravityPaths(
+          additionalPaths: configuration.additionalCLIPaths),
+        mode: .antigravity,
+        extraArgs: CLICommandConfiguration.parseArgumentString(argString)
+      )
     }
 
     let selectedMonitor: any SessionMonitorServiceProtocol = {
       switch providerKind {
       case .claude: return monitorService
       case .codex: return codexMonitorService
+      case .antigravity: return antigravityMonitorService
       }
     }()
 
@@ -619,6 +679,7 @@ public final class AgentHubProvider {
       switch providerKind {
       case .claude: return claudeFileWatcher
       case .codex: return codexFileWatcher
+      case .antigravity: return antigravityFileWatcher
       }
     }()
 
@@ -626,6 +687,7 @@ public final class AgentHubProvider {
       switch providerKind {
       case .claude: return claudeSearchService
       case .codex: return codexSearchService
+      case .antigravity: return antigravitySearchService
       }
     }()
 
@@ -649,6 +711,7 @@ public final class AgentHubProvider {
       approvalClaimStore: claimStore,
       hookInstaller: installer,
       codexDataPath: providerKind == .codex ? configuration.codexDataPath : nil,
+      antigravityDataPath: providerKind == .antigravity ? configuration.antigravityDataPath : nil,
       terminalSurfaceFactory: terminalSurfaceFactory,
       terminalBackend: terminalBackend,
       terminalWorkspaceStore: metadataStore

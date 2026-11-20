@@ -69,6 +69,8 @@ public struct CLINotInstalledView: View {
       return "Install Claude CLI to monitor and manage your Claude Code sessions."
     case .codex:
       return "Install Codex CLI to monitor and manage your Codex sessions."
+    case .antigravity:
+      return "Install the Antigravity CLI (agy) to monitor and manage your Antigravity sessions."
     }
   }
 
@@ -78,6 +80,8 @@ public struct CLINotInstalledView: View {
       return URL(string: "https://docs.anthropic.com/en/docs/claude-code/overview")!
     case .codex:
       return URL(string: "https://github.com/openai/codex")!
+    case .antigravity:
+      return URL(string: "https://antigravity.google")!
     }
   }
 }
@@ -89,5 +93,10 @@ public struct CLINotInstalledView: View {
 
 #Preview("Codex Not Installed") {
   CLINotInstalledView(provider: .codex)
+    .frame(width: 400, height: 400)
+}
+
+#Preview("Antigravity Not Installed") {
+  CLINotInstalledView(provider: .antigravity)
     .frame(width: 400, height: 400)
 }

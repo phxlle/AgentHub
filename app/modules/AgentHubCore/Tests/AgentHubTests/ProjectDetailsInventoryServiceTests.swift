@@ -125,7 +125,7 @@ struct ProjectDetailsInventoryServiceTests {
       let inventory = scan(home: home, project: project)
 
       let skill = try #require(inventory.skills.first)
-      #expect(skill.providers == [.claude, .codex])
+      #expect(skill.providers == Set(SessionProviderKind.allCases))
       #expect(skill.scope == .project)
     }
   }
@@ -288,7 +288,7 @@ struct ProjectDetailsInventoryServiceTests {
       let projectAgents = try #require(
         inventory.rules.first { $0.title == "AGENTS.md" && $0.scope == .project }
       )
-      #expect(projectAgents.providers == [.codex])
+      #expect(projectAgents.providers == [.codex, .antigravity])
     }
   }
 

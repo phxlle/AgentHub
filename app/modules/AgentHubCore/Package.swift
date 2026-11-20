@@ -183,7 +183,10 @@ let package = Package(
     ),
     .testTarget(
       name: "AgentHubSessionGraphTests",
-      dependencies: ["AgentHubSessionGraph"],
+      dependencies: [
+        "AgentHubSessionGraph",
+        .product(name: "GRDB", package: "GRDB.swift"),
+      ],
       path: "Tests/AgentHubSessionGraphTests",
       swiftSettings: [
         .swiftLanguageMode(.v5)

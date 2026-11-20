@@ -94,6 +94,7 @@ extension VoiceAgentToolExecuting {
 public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   private let claudeViewModel: any VoiceSessionManaging
   private let codexViewModel: any VoiceSessionManaging
+  private let antigravityViewModel: (any VoiceSessionManaging)?
   private let selectionRouter: GlobalSessionSelectionRouter
   private let targetResolver: any VoiceSessionTargetResolving
   private let transcriptReader: any VoiceSessionTranscriptReading
@@ -104,6 +105,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     selectionRouter: GlobalSessionSelectionRouter,
     targetResolver: any VoiceSessionTargetResolving,
     transcriptReader: any VoiceSessionTranscriptReading = VoiceSessionTranscriptReader(),
@@ -112,18 +114,21 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.selectionRouter = selectionRouter
     self.targetResolver = targetResolver
     self.transcriptReader = transcriptReader
     self.worktreeCreator = worktreeCreator ?? VoiceWorktreeCreator()
     self.launchRequestHandler = launchRequestHandler ?? WorktreeLaunchRequestHandler(
       claudeViewModel: claudeViewModel,
-      codexViewModel: codexViewModel
+      codexViewModel: codexViewModel,
+      antigravityViewModel: antigravityViewModel
     )
     snapshotProvider = {
       SessionInvestigationSnapshotBuilder.make(
         claudeViewModel: claudeViewModel,
-        codexViewModel: codexViewModel
+        codexViewModel: codexViewModel,
+        antigravityViewModel: antigravityViewModel
       )
     }
   }
@@ -131,6 +136,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   public init(
     claudeViewModel: any VoiceSessionManaging,
     codexViewModel: any VoiceSessionManaging,
+    antigravityViewModel: (any VoiceSessionManaging)? = nil,
     selectionRouter: GlobalSessionSelectionRouter,
     targetResolver: any VoiceSessionTargetResolving,
     transcriptReader: any VoiceSessionTranscriptReading = VoiceSessionTranscriptReader(),
@@ -139,6 +145,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.selectionRouter = selectionRouter
     self.targetResolver = targetResolver
     self.transcriptReader = transcriptReader
@@ -168,7 +175,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
         )
       }
     } else {
-      sessions = [claudeViewModel, codexViewModel].flatMap { viewModel in
+      sessions = allViewModels.flatMap { viewModel in
         viewModel.voiceSessions.map { session in
           let state = viewModel.monitorStates[session.id]
           return VoiceSessionSummary(
@@ -306,7 +313,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   public func listWorktrees() -> VoiceWorktreeInventory {
     var repositories: [VoiceRepositorySummary] = []
     var seenRepositoryPaths = Set<String>()
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       for repository in viewModel.selectedRepositories
         where seenRepositoryPaths.insert(repository.path).inserted {
         var worktrees: [VoiceWorktreeSummary] = []
@@ -381,7 +388,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
           branch: task.branch
         )
         try await launchRequestHandler.handle(WorktreeLaunchRequest(
-          provider: task.provider == .claude ? .claude : .codex,
+          provider: WorktreeLaunchProvider(rawValue: task.provider.rawValue) ?? .claude,
           repositoryPath: created.repositoryPath,
           worktreePath: created.worktreePath,
           launchPath: created.launchPath,
@@ -524,7 +531,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
       switch record.provider {
       case .claude:
         WebPreviewAgentURLResolver.sessionFilePath(for: record.session)
-      case .codex:
+      case .codex, .antigravity:
         record.session.sessionFilePath
       }
     guard let path else { return nil }
@@ -550,6 +557,9 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
     if let session = session(id: sessionId, in: codexViewModel) {
       return (session, .codex, codexViewModel)
     }
+    if let antigravityViewModel, let session = session(id: sessionId, in: antigravityViewModel) {
+      return (session, .antigravity, antigravityViewModel)
+    }
     return nil
   }
 
@@ -563,12 +573,20 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   private func viewModel(
     for provider: SessionProviderKind
   ) -> any VoiceSessionManaging {
-    provider == .claude ? claudeViewModel : codexViewModel
+    switch provider {
+    case .claude: claudeViewModel
+    case .codex: codexViewModel
+    case .antigravity: antigravityViewModel ?? claudeViewModel
+    }
+  }
+
+  private var allViewModels: [any VoiceSessionManaging] {
+    [claudeViewModel, codexViewModel] + [antigravityViewModel].compactMap { $0 }
   }
 
   private func resolvedSessionID(forPendingID rawValue: String) -> String? {
     guard let pendingID = UUID(uuidString: rawValue) else { return nil }
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       if let sessionID = viewModel.resolvedPendingSessions[pendingID] {
         return sessionID
       }
@@ -579,7 +597,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   private func pendingViewModel(
     for pendingID: UUID
   ) -> (any VoiceSessionManaging)? {
-    [claudeViewModel, codexViewModel].first { viewModel in
+    allViewModels.first { viewModel in
       viewModel.pendingHubSessions.contains(where: { $0.id == pendingID })
         || viewModel.resolvedPendingSessions[pendingID] != nil
         || viewModel.lastCreatedPendingId == pendingID
@@ -587,7 +605,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   }
 
   private func sessionCount(forPath path: String) -> Int {
-    [claudeViewModel, codexViewModel].reduce(0) { count, viewModel in
+    allViewModels.reduce(0) { count, viewModel in
       count + viewModel.voiceSessions.filter { $0.projectPath == path }.count
     }
   }
@@ -595,7 +613,7 @@ public final class VoiceAgentToolExecutor: VoiceAgentToolExecuting {
   private func registeredRepository(
     containing path: String
   ) -> SelectedRepository? {
-    for viewModel in [claudeViewModel, codexViewModel] {
+    for viewModel in allViewModels {
       if let match = WorktreeModuleResolver.bestMatch(
         for: path,
         repositories: viewModel.selectedRepositories

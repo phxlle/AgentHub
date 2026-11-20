@@ -137,6 +137,11 @@ struct GitHubPRDetailView: View {
             } label: {
               Label("Codex", systemImage: "c.square")
             }
+            Button {
+              onStartNewSession("/review \(pr.url)", .antigravity)
+            } label: {
+              Label("Antigravity", systemImage: "sparkles")
+            }
           } label: {
             HStack(spacing: 3) {
               Image(systemName: "eye")

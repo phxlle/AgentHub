@@ -3,6 +3,7 @@ import Foundation
 public enum WorktreeLaunchProvider: String, Codable, CaseIterable, Equatable, Sendable {
   case claude = "Claude"
   case codex = "Codex"
+  case antigravity = "Antigravity"
 
   public init?(commandLineValue: String) {
     let normalized = commandLineValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -11,6 +12,8 @@ public enum WorktreeLaunchProvider: String, Codable, CaseIterable, Equatable, Se
       self = .claude
     case "codex":
       self = .codex
+    case "antigravity", "agy":
+      self = .antigravity
     default:
       return nil
     }
@@ -26,6 +29,7 @@ public enum WorktreeLaunchProvider: String, Codable, CaseIterable, Equatable, Se
     switch self {
     case .claude: return "Claude Code"
     case .codex: return "Codex"
+    case .antigravity: return "Antigravity"
     }
   }
 }
@@ -84,7 +88,7 @@ public enum WorktreeLaunchRequestQueueError: LocalizedError, Sendable {
   public var errorDescription: String? {
     switch self {
     case .missingProvider:
-      return "Missing launch provider. Pass --provider claude|codex or run inside an AgentHub embedded session."
+      return "Missing launch provider. Pass --provider claude|codex|antigravity or run inside an AgentHub embedded session."
     case .missingPrompt:
       return "Missing launch prompt. Pass --prompt when using --launch-session."
     }

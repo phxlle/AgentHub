@@ -9,10 +9,11 @@ import SwiftUI
 
 // MARK: - GlobalStatsMenuView
 
-/// View for displaying global Claude Code or Codex stats in a menu bar dropdown
+/// View for displaying global Claude Code, Codex or Antigravity stats in a menu bar dropdown
 public struct GlobalStatsMenuView: View {
   let claudeService: GlobalStatsService
   let codexService: CodexGlobalStatsService?
+  let antigravityService: AntigravityGlobalStatsService?
   let sessionsViewModel: CLISessionsViewModel?
   let showQuitButton: Bool
 
@@ -26,11 +27,13 @@ public struct GlobalStatsMenuView: View {
   public init(
     claudeService: GlobalStatsService,
     codexService: CodexGlobalStatsService? = nil,
+    antigravityService: AntigravityGlobalStatsService? = nil,
     sessionsViewModel: CLISessionsViewModel? = nil,
     showQuitButton: Bool = true
   ) {
     self.claudeService = claudeService
     self.codexService = codexService
+    self.antigravityService = antigravityService
     self.sessionsViewModel = sessionsViewModel
     self.showQuitButton = showQuitButton
   }
@@ -43,29 +46,34 @@ public struct GlobalStatsMenuView: View {
   ) {
     self.claudeService = service
     self.codexService = nil
+    self.antigravityService = nil
     self.sessionsViewModel = sessionsViewModel
     self.showQuitButton = showQuitButton
   }
 
   public var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      // Segmented control at top (only if Codex service provided)
-      if codexService != nil {
+      // Segmented control at top (only if a non-Claude service is provided)
+      if codexService != nil || antigravityService != nil {
         StatsProviderSegmentedControl(
           selectedProvider: Binding(
             get: { selectedProvider },
             set: { selectedProviderRaw = $0.rawValue }
           ),
           claudeSessionCount: claudeService.stats.totalSessions,
-          codexSessionCount: codexService?.totalSessions ?? 0
+          codexSessionCount: codexService?.totalSessions ?? 0,
+          antigravitySessionCount: antigravityService?.totalSessions ?? 0
         )
         .padding(.bottom, 12)
       }
 
-      if selectedProvider == .claude {
+      switch selectedProvider {
+      case .claude:
         claudeStatsContent
-      } else {
+      case .codex:
         codexStatsContent
+      case .antigravity:
+        antigravityStatsContent
       }
     }
     .padding(12)
@@ -75,6 +83,7 @@ public struct GlobalStatsMenuView: View {
     }
     .onDisappear {
       codexService?.cancelLoading()
+      antigravityService?.cancelLoading()
     }
   }
 
@@ -181,6 +190,53 @@ public struct GlobalStatsMenuView: View {
     }
   }
 
+  // MARK: - Antigravity Stats Content
+
+  @ViewBuilder
+  private var antigravityStatsContent: some View {
+    if let antigravity = antigravityService, antigravity.isAvailable {
+      // Header with optional loading indicator
+      HStack {
+        headerSection(title: "Antigravity Stats", icon: "chart.bar.fill", provider: .antigravity)
+        if antigravity.isLoading {
+          ProgressView()
+            .scaleEffect(0.6)
+            .frame(width: 16, height: 16)
+        }
+      }
+
+      Divider()
+        .padding(.vertical, 8)
+
+      // Total stats
+      antigravityTotalStatsSection(antigravity)
+
+      Divider()
+        .padding(.vertical, 8)
+
+      // Model breakdown
+      antigravityModelBreakdownSection(antigravity)
+
+      Divider()
+        .padding(.vertical, 8)
+
+      // Footer with refresh
+      footerSection(onRefresh: { antigravity.refresh() }, lastUpdated: antigravity.lastUpdated)
+
+      // Quit button at the bottom
+      if showQuitButton {
+        Divider()
+          .padding(.vertical, 8)
+
+        quitButton
+      }
+    } else {
+      Text("Antigravity stats not available")
+        .foregroundColor(.secondary)
+        .padding()
+    }
+  }
+
   // MARK: - Header Section
 
   private func headerSection(title: String, icon: String, provider: SessionProviderKind) -> some View {
@@ -263,6 +319,33 @@ public struct GlobalStatsMenuView: View {
     }
   }
 
+  // MARK: - Antigravity Total Stats Section
+
+  private func antigravityTotalStatsSection(_ antigravity: AntigravityGlobalStatsService) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      StatRow(
+        label: "Total Tokens",
+        value: antigravity.formattedTotalTokens,
+        icon: "number.circle.fill",
+        provider: .antigravity
+      )
+
+      StatRow(
+        label: "Sessions",
+        value: "\(antigravity.totalSessions)",
+        icon: "terminal.fill",
+        provider: .antigravity
+      )
+
+      StatRow(
+        label: "Messages",
+        value: formatNumber(antigravity.totalMessages),
+        icon: "message.fill",
+        provider: .antigravity
+      )
+    }
+  }
+
   // MARK: - Claude Today Section
 
   private var claudeTodaySection: some View {
@@ -328,6 +411,34 @@ public struct GlobalStatsMenuView: View {
       }
 
       if codex.sortedModelStats.isEmpty {
+        Text("No model data")
+          .font(.caption)
+          .foregroundColor(.secondary)
+      }
+    }
+  }
+
+  // MARK: - Antigravity Model Breakdown Section
+
+  private func antigravityModelBreakdownSection(_ antigravity: AntigravityGlobalStatsService) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text("By Model")
+        .font(.subheadline)
+        .fontWeight(.semibold)
+        .foregroundColor(.secondary)
+
+      ForEach(antigravity.sortedModelStats, id: \.name) { model in
+        HStack {
+          Text(model.name)
+            .font(.caption)
+          Spacer()
+          Text(formatTokenCount(model.usage.totalTokens))
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
+      }
+
+      if antigravity.sortedModelStats.isEmpty {
         Text("No model data")
           .font(.caption)
           .foregroundColor(.secondary)

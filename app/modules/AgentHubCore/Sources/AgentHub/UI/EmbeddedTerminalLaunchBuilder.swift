@@ -107,6 +107,11 @@ public enum EmbeddedTerminalLaunchBuilder {
         command: cliConfiguration.executableName,
         additionalPaths: cliConfiguration.additionalPaths
       )
+    case .antigravity:
+      executablePath = TerminalLauncher.findAntigravityExecutable(
+        command: cliConfiguration.executableName,
+        additionalPaths: cliConfiguration.additionalPaths
+      )
     case .claude:
       executablePath = TerminalLauncher.findExecutable(
         command: cliConfiguration.executableName,

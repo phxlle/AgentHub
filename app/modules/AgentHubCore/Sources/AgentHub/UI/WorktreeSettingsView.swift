@@ -52,6 +52,7 @@ public struct WorktreeSettingsView: View {
         WorktreeInventorySection(
           claudeViewModel: agentHub.claudeSessionsViewModel,
           codexViewModel: agentHub.codexSessionsViewModel,
+          antigravityViewModel: agentHub.antigravitySessionsViewModel,
           inventoryService: agentHub.gitService,
           worktreeRemovalService: agentHub.gitService
         )

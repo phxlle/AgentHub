@@ -72,11 +72,8 @@ public struct AgentHubOperationsView: View {
                 section = .sessions
               },
               onCloseSession: { assignment in
-                let sessionsViewModel =
-                  assignment.provider == .claude
-                  ? agentHub.claudeSessionsViewModel
-                  : agentHub.codexSessionsViewModel
-                sessionsViewModel.stopMonitoring(session: assignment.session)
+                agentHub.sessionsViewModel(for: assignment.provider)
+                  .stopMonitoring(session: assignment.session)
               },
               onStartSession: { workflowID, provider, initialPrompt in
                 startSession(
@@ -103,6 +100,7 @@ public struct AgentHubOperationsView: View {
               viewModel: agentHub.gitHubReviewsViewModel,
               claudeSessionsViewModel: agentHub.claudeSessionsViewModel,
               codexSessionsViewModel: agentHub.codexSessionsViewModel,
+              antigravitySessionsViewModel: agentHub.antigravitySessionsViewModel,
               onReview: { pullRequest, provider, template in
                 await startReview(
                   pullRequest,
@@ -125,10 +123,7 @@ public struct AgentHubOperationsView: View {
           if let agentHub {
             JiraSprintView(
               viewModel: agentHub.jiraSprintViewModel,
-              repositories: WorktreeModuleResolver.mergedRepositories(
-                agentHub.claudeSessionsViewModel.selectedRepositories
-                  + agentHub.codexSessionsViewModel.selectedRepositories
-              ),
+              repositories: Self.allSelectedRepositories(agentHub),
               linkedSessions: agentHub.jiraLinkedSessions(),
               onStart: { ticket, provider, repositoryPath in
                 await startJiraTicket(
@@ -162,35 +157,14 @@ public struct AgentHubOperationsView: View {
       Color.adaptiveBackground(for: colorScheme, theme: runtimeTheme)
         .ignoresSafeArea()
     )
-    .onChange(
-      of: agentHub?.claudeSessionsViewModel.resolvedPendingSessionHistory ?? [:]
-    ) { _, resolutions in
-      guard let agentHub else { return }
-      Task {
-        await agentHub.gitHubReviewsViewModel.resolveReviewLaunches(
-          resolutions,
-          provider: .claude
-        )
-        applyReviewSessionTitles(provider: .claude, agentHub: agentHub)
-      }
-      for (sessionID, name) in agentHub.jiraSprintViewModel.takeSessionNames(resolved: resolutions) {
-        agentHub.claudeSessionsViewModel.setCustomName(name, forSessionId: sessionID)
-      }
+    .onChange(of: agentHub?.claudeSessionsViewModel.resolvedPendingSessionHistory ?? [:]) { _, resolutions in
+      handleResolvedPendingSessions(resolutions, provider: .claude)
     }
-    .onChange(
-      of: agentHub?.codexSessionsViewModel.resolvedPendingSessionHistory ?? [:]
-    ) { _, resolutions in
-      guard let agentHub else { return }
-      Task {
-        await agentHub.gitHubReviewsViewModel.resolveReviewLaunches(
-          resolutions,
-          provider: .codex
-        )
-        applyReviewSessionTitles(provider: .codex, agentHub: agentHub)
-      }
-      for (sessionID, name) in agentHub.jiraSprintViewModel.takeSessionNames(resolved: resolutions) {
-        agentHub.codexSessionsViewModel.setCustomName(name, forSessionId: sessionID)
-      }
+    .onChange(of: agentHub?.codexSessionsViewModel.resolvedPendingSessionHistory ?? [:]) { _, resolutions in
+      handleResolvedPendingSessions(resolutions, provider: .codex)
+    }
+    .onChange(of: agentHub?.antigravitySessionsViewModel.resolvedPendingSessionHistory ?? [:]) { _, resolutions in
+      handleResolvedPendingSessions(resolutions, provider: .antigravity)
     }
     .task {
       guard let agentHub else { return }
@@ -235,10 +209,7 @@ public struct AgentHubOperationsView: View {
       return
     }
 
-    let sessionsViewModel =
-      provider == .claude
-      ? agentHub.claudeSessionsViewModel
-      : agentHub.codexSessionsViewModel
+    let sessionsViewModel = agentHub.sessionsViewModel(for: provider)
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(workflow.repositoryPath)
     let existingWorktree = sessionsViewModel.selectedRepositories
       .flatMap(\.worktrees)
@@ -280,10 +251,7 @@ public struct AgentHubOperationsView: View {
       let view = agentHub.gitHubReviewsViewModel.selectedView
     else { return }
 
-    let repositories = WorktreeModuleResolver.mergedRepositories(
-      agentHub.claudeSessionsViewModel.selectedRepositories
-        + agentHub.codexSessionsViewModel.selectedRepositories
-    )
+    let repositories = Self.allSelectedRepositories(agentHub)
     guard
       let repositoryPath = localRepositoryPath(
         named: pullRequest.repositoryName,
@@ -296,10 +264,7 @@ public struct AgentHubOperationsView: View {
       return
     }
 
-    let sessionsViewModel =
-      provider == .claude
-      ? agentHub.claudeSessionsViewModel
-      : agentHub.codexSessionsViewModel
+    let sessionsViewModel = agentHub.sessionsViewModel(for: provider)
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(repositoryPath)
     let target = WorktreeBranch(
       name: pullRequest.title,
@@ -342,13 +307,38 @@ public struct AgentHubOperationsView: View {
     applyReviewSessionTitles(provider: provider, agentHub: agentHub)
   }
 
-  /// Looks the id up in Claude and Codex at once and opens whichever has it.
+  /// A pending launch resolved to a real session: hand the id to the review
+  /// tracker and apply any Jira-provided session name.
+  private func handleResolvedPendingSessions(_ resolutions: [UUID: String], provider: SessionProviderKind) {
+    guard let agentHub else { return }
+    Task {
+      await agentHub.gitHubReviewsViewModel.resolveReviewLaunches(resolutions, provider: provider)
+      applyReviewSessionTitles(provider: provider, agentHub: agentHub)
+    }
+    let sessionsViewModel = agentHub.sessionsViewModel(for: provider)
+    for (sessionID, name) in agentHub.jiraSprintViewModel.takeSessionNames(resolved: resolutions) {
+      sessionsViewModel.setCustomName(name, forSessionId: sessionID)
+    }
+  }
+
+  /// Tracked repositories of every provider, merged and deduplicated.
+  private static func allSelectedRepositories(_ agentHub: AgentHubProvider) -> [SelectedRepository] {
+    var repositories: [SelectedRepository] = []
+    for provider in SessionProviderKind.allCases {
+      repositories += agentHub.sessionsViewModel(for: provider).selectedRepositories
+    }
+    return WorktreeModuleResolver.mergedRepositories(repositories)
+  }
+
+  /// Looks the id up in every provider at once and opens whichever has it.
   private func resumeSession(id: String, agentHub: AgentHubProvider) async -> Bool {
     async let claude = agentHub.claudeSessionsViewModel.resumeSession(id: id)
     async let codex = agentHub.codexSessionsViewModel.resumeSession(id: id)
-    let (claudeSession, codexSession) = await (claude, codex)
-    guard let session = claudeSession ?? codexSession else { return false }
-    let provider: SessionProviderKind = claudeSession != nil ? .claude : .codex
+    async let antigravity = agentHub.antigravitySessionsViewModel.resumeSession(id: id)
+    let (claudeSession, codexSession, antigravitySession) = await (claude, codex, antigravity)
+    guard let session = claudeSession ?? codexSession ?? antigravitySession else { return false }
+    let provider: SessionProviderKind =
+      claudeSession != nil ? .claude : codexSession != nil ? .codex : .antigravity
     agentHub.globalSessionSelectionRouter.select(
       providerKind: provider,
       sessionId: session.id,
@@ -365,10 +355,7 @@ public struct AgentHubOperationsView: View {
     repositoryPath: String,
     agentHub: AgentHubProvider
   ) async {
-    let sessionsViewModel =
-      provider == .claude
-      ? agentHub.claudeSessionsViewModel
-      : agentHub.codexSessionsViewModel
+    let sessionsViewModel = agentHub.sessionsViewModel(for: provider)
     let normalizedPath = WorktreeModuleResolver.normalizedDirectoryPath(repositoryPath)
     let prompt = await agentHub.jiraSprintViewModel.launchPrompt(for: ticket)
 
@@ -394,10 +381,7 @@ public struct AgentHubOperationsView: View {
     provider: SessionProviderKind,
     agentHub: AgentHubProvider
   ) {
-    let sessionsViewModel =
-      provider == .claude
-      ? agentHub.claudeSessionsViewModel
-      : agentHub.codexSessionsViewModel
+    let sessionsViewModel = agentHub.sessionsViewModel(for: provider)
     for (sessionID, title) in agentHub.gitHubReviewsViewModel.linkedSessionTitles(
       provider: provider
     ) {
@@ -409,10 +393,7 @@ public struct AgentHubOperationsView: View {
     _ link: GitHubReviewSessionLink,
     agentHub: AgentHubProvider
   ) {
-    let sessionsViewModel =
-      link.provider == .claude
-      ? agentHub.claudeSessionsViewModel
-      : agentHub.codexSessionsViewModel
+    let sessionsViewModel = agentHub.sessionsViewModel(for: link.provider)
     if !link.isPending, !sessionsViewModel.isMonitoring(sessionId: link.session.id) {
       sessionsViewModel.startMonitoring(session: link.session)
     }
@@ -487,6 +468,7 @@ public struct AgentHubSessionsView: View {
     MultiProviderSessionsListView(
       claudeViewModel: provider.claudeSessionsViewModel,
       codexViewModel: provider.codexSessionsViewModel,
+      antigravityViewModel: provider.antigravitySessionsViewModel,
       workspaceViewModel: provider.agentWorkspacesViewModel,
       columnVisibility: $columnVisibility,
       intelligenceViewModel: provider.intelligenceViewModel,
@@ -538,6 +520,7 @@ public struct AgentHubMenuBarContent: View {
       GlobalStatsMenuView(
         claudeService: provider.statsService,
         codexService: provider.codexStatsService,
+        antigravityService: provider.antigravityStatsService,
         sessionsViewModel: provider.sessionsViewModel
       )
     } else {
@@ -596,6 +579,7 @@ private struct WorkspaceSwitcherBar: View {
     let activeSessions = agentHub.map {
       $0.claudeSessionsViewModel.monitoredSessionIds.count
         + $0.codexSessionsViewModel.monitoredSessionIds.count
+        + $0.antigravitySessionsViewModel.monitoredSessionIds.count
     }
     return [
       WorkspaceSwitcherItem(
@@ -615,7 +599,7 @@ private struct WorkspaceSwitcherBar: View {
 
 // MARK: - ResumeSessionByIDSheet
 
-/// Paste a session id (or a `claude --resume …` / `codex resume …` command).
+/// Paste a session id (or a `claude --resume …` / `codex resume …` / `agy --conversation …` command).
 private struct ResumeSessionByIDSheet: View {
   let onResume: (String) async -> Bool
   let onDismiss: () -> Void
@@ -632,7 +616,7 @@ private struct ResumeSessionByIDSheet: View {
       VStack(alignment: .leading, spacing: 3) {
         Text("Resume a session")
           .font(.geist(size: 15, weight: .semibold))
-        Text("Paste a Claude or Codex session ID. A full resume command works too.")
+        Text("Paste a Claude, Codex or Antigravity session ID. A full resume command works too.")
           .font(.secondarySmall)
           .foregroundStyle(.secondary)
       }
@@ -643,7 +627,7 @@ private struct ResumeSessionByIDSheet: View {
         .onSubmit(resume)
         .onChange(of: text) { _, _ in notFound = false }
       if notFound {
-        Label("No Claude or Codex session found with this ID.", systemImage: "questionmark.circle")
+        Label("No Claude, Codex or Antigravity session found with this ID.", systemImage: "questionmark.circle")
           .font(.secondarySmall)
           .foregroundStyle(.orange)
       } else if !text.isEmpty, sessionID == nil {

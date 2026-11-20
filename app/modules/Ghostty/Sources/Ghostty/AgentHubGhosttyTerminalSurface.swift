@@ -1063,7 +1063,7 @@ public final class AgentHubGhosttyTerminalSurface: NSView, EmbeddedTerminalSurfa
     let cliConfiguration = cliConfigurationOverride
       ?? workspaceCLIConfigurationProvider?(provider)
       ?? sessionViewModel?.cliConfiguration(for: provider)
-      ?? (provider == .claude ? .claudeDefault : .codexDefault)
+      ?? CLICommandConfiguration.default(for: provider)
     let launch = EmbeddedTerminalLaunchBuilder.cliLaunch(
       sessionId: sessionId,
       projectPath: workingDirectory,
@@ -1089,9 +1089,7 @@ public final class AgentHubGhosttyTerminalSurface: NSView, EmbeddedTerminalSurfa
     guard let provider else { return configuredExpectedExecutable }
     return workspaceCLIConfigurationProvider?(provider).executableName
       ?? sessionViewModel?.cliConfiguration(for: provider).executableName
-      ?? (provider == .claude
-        ? CLICommandConfiguration.claudeDefault.executableName
-        : CLICommandConfiguration.codexDefault.executableName)
+      ?? CLICommandConfiguration.default(for: provider).executableName
   }
 
   private func currentInitialSurfaceSize() -> GhosttySurfaceInitialSize? {
@@ -2157,6 +2155,13 @@ public final class AgentHubGhosttyTerminalSurface: NSView, EmbeddedTerminalSurfa
     }
     if label.contains("codex") {
       return .codex
+    }
+    // `agy` is short enough to appear inside other words (e.g. "strategy"), so
+    // match it as a whole token; "antigravity" is matched anywhere.
+    if label.contains("antigravity")
+      || label.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains("agy")
+    {
+      return .antigravity
     }
     return nil
   }

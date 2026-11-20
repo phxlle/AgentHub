@@ -1138,7 +1138,7 @@ public class TerminalContainerView: NSView, ManagedLocalProcessTerminalViewDeleg
 
       let cliConfiguration = cliConfigurationOverride
         ?? self.sessionViewModel?.cliConfiguration(for: provider)
-        ?? (provider == .claude ? .claudeDefault : .codexDefault)
+        ?? .default(for: provider)
       self.startCLIProcess(
         terminal: tab.terminalView,
         sessionId: sessionId,
@@ -1316,7 +1316,19 @@ public class TerminalContainerView: NSView, ManagedLocalProcessTerminalViewDeleg
     if label.contains("codex") {
       return .codex
     }
+    if Self.labelMentionsAntigravity(label) {
+      return .antigravity
+    }
     return nil
+  }
+
+  /// `agy` is short enough to appear inside other words (e.g. "strategy"), so
+  /// match it as a whole token; "antigravity" is matched anywhere.
+  static func labelMentionsAntigravity(_ lowercasedLabel: String) -> Bool {
+    lowercasedLabel.contains("antigravity")
+      || lowercasedLabel
+        .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        .contains("agy")
   }
 
   private func canCloseRegularPanel(_ panel: RegularTerminalPanel) -> Bool {

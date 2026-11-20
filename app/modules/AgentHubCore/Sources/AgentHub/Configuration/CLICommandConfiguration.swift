@@ -10,6 +10,7 @@ import Foundation
 public enum CLICommandMode: String, Codable, Sendable {
   case claude
   case codex
+  case antigravity
 }
 
 public struct XcodeBuildMCPBootstrap: Equatable, Sendable {
@@ -110,6 +111,19 @@ public struct CLICommandConfiguration: Codable, Sendable {
 
   public static var codexDefault: CLICommandConfiguration {
     CLICommandConfiguration(command: "codex", additionalPaths: [], mode: .codex)
+  }
+
+  public static var antigravityDefault: CLICommandConfiguration {
+    CLICommandConfiguration(command: "agy", additionalPaths: [], mode: .antigravity)
+  }
+
+  /// Built-in configuration for a provider when no view model or override supplies one.
+  public static func `default`(for provider: SessionProviderKind) -> CLICommandConfiguration {
+    switch provider {
+    case .claude: return .claudeDefault
+    case .codex: return .codexDefault
+    case .antigravity: return .antigravityDefault
+    }
   }
 
   public func argumentsForSession(
@@ -265,6 +279,36 @@ public struct CLICommandConfiguration: Codable, Sendable {
         trailingArgs.append(prompt)
       }
       return assembleArguments(prefix: prefix, providerArgs: providerArgs, trailingArgs: trailingArgs)
+
+    case .antigravity:
+      // Antigravity CLI (`agy`). MCP servers can only come from the global
+      // ~/.gemini/config/mcp_config.json, so the agenthub/XcodeBuildMCP servers
+      // are not injected per session, and there is no system-prompt flag.
+      var providerArgs: [String] = []
+      let isNewSession = sessionId == nil || sessionId?.isEmpty == true || sessionId?.hasPrefix("pending-") == true
+
+      if isNewSession {
+        if permissionModePlan {
+          providerArgs += ["--mode", "plan"]
+        } else if dangerouslySkipPermissions {
+          providerArgs.append("--dangerously-skip-permissions")
+        }
+        if let model, !model.isEmpty {
+          providerArgs += ["--model", model]
+        }
+        if let effortLevel, !effortLevel.isEmpty {
+          providerArgs += ["--effort", effortLevel]
+        }
+      } else if let sessionId {
+        providerArgs += ["--conversation", sessionId]
+      }
+
+      // `-i` runs the prompt and keeps the interactive session open.
+      var trailingArgs: [String] = []
+      if let prompt, !prompt.isEmpty {
+        trailingArgs += ["-i", prompt]
+      }
+      return assembleArguments(prefix: prefix, providerArgs: providerArgs, trailingArgs: trailingArgs)
     }
   }
 
@@ -331,7 +375,7 @@ public struct CLICommandConfiguration: Codable, Sendable {
     var prefix = subcommandArgs
     guard isWrapperExecutable else { return prefix }
 
-    if !prefix.contains("claude"), !prefix.contains("codex") {
+    if !prefix.contains("claude"), !prefix.contains("codex"), !prefix.contains("agy") {
       prefix.append(nativeProviderExecutableName)
     }
     return prefix
@@ -355,6 +399,7 @@ public struct CLICommandConfiguration: Codable, Sendable {
     switch mode {
     case .claude: return "claude"
     case .codex: return "codex"
+    case .antigravity: return "agy"
     }
   }
 

@@ -1557,7 +1557,7 @@ public struct WebPreviewView: View {
     tweakGenerationTimer.start()
     tweaksAgentState = .working
     let cliConfiguration = viewModel?.cliConfiguration(for: providerKind)
-      ?? (providerKind == .claude ? .claudeDefault : .codexDefault)
+      ?? .default(for: providerKind)
     Task {
       defer { tweakGenerationTimer.stop() }
       do {

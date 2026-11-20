@@ -33,6 +33,9 @@ struct AgentWorkspaceSurfaceMenu: View {
       Button("Codex", systemImage: "chevron.left.forwardslash.chevron.right") {
         onLaunch(.agent(.codex), placement)
       }
+      Button("Antigravity", systemImage: "sparkles") {
+        onLaunch(.agent(.antigravity), placement)
+      }
     }
   }
 }

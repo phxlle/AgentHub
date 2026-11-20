@@ -224,6 +224,9 @@ public enum SessionInteractiveInputTool {
     let normalized = toolName.lowercased().filter(\.isLetter)
     return normalized.hasSuffix("requestuserinput")
       || normalized.hasSuffix("askuserquestion")
+      || normalized == "askquestion"
+      || normalized == "askpermission"
+      || normalized == "askcustompermission"
   }
 }
 

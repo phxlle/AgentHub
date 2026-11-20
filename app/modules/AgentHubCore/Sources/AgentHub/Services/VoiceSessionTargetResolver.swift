@@ -41,15 +41,18 @@ extension CLISessionsViewModel: VoiceSessionTargetSource {
 public final class VoiceSessionTargetResolver: VoiceSessionTargetResolving {
   private let claudeViewModel: any VoiceSessionTargetSource
   private let codexViewModel: any VoiceSessionTargetSource
+  private let antigravityViewModel: (any VoiceSessionTargetSource)?
   private let selectionRouter: GlobalSessionSelectionRouter
 
   public init(
     claudeViewModel: any VoiceSessionTargetSource,
     codexViewModel: any VoiceSessionTargetSource,
+    antigravityViewModel: (any VoiceSessionTargetSource)? = nil,
     selectionRouter: GlobalSessionSelectionRouter
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self.selectionRouter = selectionRouter
   }
 
@@ -63,6 +66,7 @@ public final class VoiceSessionTargetResolver: VoiceSessionTargetResolving {
     let lastFocused = [
       focusedTarget(viewModel: claudeViewModel, provider: .claude, targets: targets),
       focusedTarget(viewModel: codexViewModel, provider: .codex, targets: targets),
+      antigravityViewModel.flatMap { focusedTarget(viewModel: $0, provider: .antigravity, targets: targets) },
     ]
       .compactMap { $0 }
       .max { $0.date < $1.date }
@@ -83,6 +87,7 @@ public final class VoiceSessionTargetResolver: VoiceSessionTargetResolving {
   public func candidates() -> [VoiceSessionTarget] {
     claudeViewModel.voiceTargetCandidates
       + codexViewModel.voiceTargetCandidates
+      + (antigravityViewModel?.voiceTargetCandidates ?? [])
   }
 
   private func focusedTarget(

@@ -122,10 +122,13 @@ public enum GlobalSessionControlPanelSnapshotBuilder {
   public static func makeItems(
     claudePending: [PendingHubSession],
     codexPending: [PendingHubSession],
+    antigravityPending: [PendingHubSession] = [],
     claudeMonitored: [(session: CLISession, state: SessionMonitorState?)],
     codexMonitored: [(session: CLISession, state: SessionMonitorState?)],
+    antigravityMonitored: [(session: CLISession, state: SessionMonitorState?)] = [],
     claudeCustomNames: [String: String],
     codexCustomNames: [String: String],
+    antigravityCustomNames: [String: String] = [:],
     gitHubStates: [String: GlobalSessionControlPanelGitHubState]
   ) -> [GlobalSessionControlPanelItem] {
     var items: [GlobalSessionControlPanelItem] = []
@@ -146,6 +149,14 @@ public enum GlobalSessionControlPanelSnapshotBuilder {
       ))
     }
 
+    for pending in antigravityPending {
+      items.append(pendingItem(
+        pending,
+        providerKind: .antigravity,
+        gitHubStates: gitHubStates
+      ))
+    }
+
     for item in claudeMonitored {
       items.append(monitoredItem(
         session: item.session,
@@ -162,6 +173,16 @@ public enum GlobalSessionControlPanelSnapshotBuilder {
         state: item.state,
         providerKind: .codex,
         customName: codexCustomNames[item.session.id],
+        gitHubStates: gitHubStates
+      ))
+    }
+
+    for item in antigravityMonitored {
+      items.append(monitoredItem(
+        session: item.session,
+        state: item.state,
+        providerKind: .antigravity,
+        customName: antigravityCustomNames[item.session.id],
         gitHubStates: gitHubStates
       ))
     }

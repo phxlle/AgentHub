@@ -134,6 +134,8 @@ struct JiraBoardColumnView: View {
       .disabled(!canStart)
     Button("Pick Up with Codex") { onStart(ticket, .codex) }
       .disabled(!canStart)
+    Button("Pick Up with Antigravity") { onStart(ticket, .antigravity) }
+      .disabled(!canStart)
     Divider()
     if let url = browseURL(ticket) {
       Button("Open in Jira") { NSWorkspace.shared.open(url) }

@@ -30,13 +30,16 @@ enum SessionNameRequestHandlingError: LocalizedError {
 public final class SessionNameRequestHandler: SessionNameRequestHandlingProtocol {
   private let claudeTarget: any SessionNameRequestTarget
   private let codexTarget: any SessionNameRequestTarget
+  private let antigravityTarget: (any SessionNameRequestTarget)?
 
   public init(
     claudeTarget: any SessionNameRequestTarget,
-    codexTarget: any SessionNameRequestTarget
+    codexTarget: any SessionNameRequestTarget,
+    antigravityTarget: (any SessionNameRequestTarget)? = nil
   ) {
     self.claudeTarget = claudeTarget
     self.codexTarget = codexTarget
+    self.antigravityTarget = antigravityTarget
   }
 
   public func handle(_ request: SessionNameRequest) async throws {
@@ -50,6 +53,8 @@ public final class SessionNameRequestHandler: SessionNameRequestHandlingProtocol
       target = claudeTarget
     case .codex:
       target = codexTarget
+    case .antigravity:
+      target = antigravityTarget ?? claudeTarget
     }
 
     let explicitSessionId = request.sourceSessionId.flatMap { sessionId in

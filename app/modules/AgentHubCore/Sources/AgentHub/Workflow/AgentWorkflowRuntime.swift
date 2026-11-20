@@ -69,6 +69,7 @@ extension SessionProviderKind {
     switch self {
     case .codex: .codex
     case .claude: .claude
+    case .antigravity: .antigravity
     }
   }
 }

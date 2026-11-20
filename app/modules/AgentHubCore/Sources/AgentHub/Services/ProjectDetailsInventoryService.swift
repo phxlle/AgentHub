@@ -120,7 +120,7 @@ public protocol ProjectDetailsInventoryServiceProtocol: Sendable {
   func inventory(forProjectAt projectPath: String) async -> ProjectDetailsInventory
 }
 
-/// Scans the standard Claude and Codex on-disk locations for skills, MCP
+/// Scans the standard Claude, Codex and Antigravity on-disk locations for skills, MCP
 /// servers, and rules files relevant to a project:
 /// - Skills: `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills` and the
 ///   project-level `.claude/skills`, `.codex/skills`, `.agents/skills`.
@@ -180,9 +180,19 @@ public actor ProjectDetailsInventoryService: ProjectDetailsInventoryServiceProto
         providers: [.codex]
       ),
       SkillSource(
+        root: homeDirectory.appendingPathComponent(".gemini/antigravity-cli/skills", isDirectory: true),
+        scope: .personal,
+        providers: [.antigravity]
+      ),
+      SkillSource(
+        root: homeDirectory.appendingPathComponent(".gemini/skills", isDirectory: true),
+        scope: .personal,
+        providers: [.antigravity]
+      ),
+      SkillSource(
         root: homeDirectory.appendingPathComponent(".agents/skills", isDirectory: true),
         scope: .personal,
-        providers: [.claude, .codex]
+        providers: Set(SessionProviderKind.allCases)
       ),
       SkillSource(
         root: projectURL.appendingPathComponent(".claude/skills", isDirectory: true),
@@ -197,7 +207,7 @@ public actor ProjectDetailsInventoryService: ProjectDetailsInventoryServiceProto
       SkillSource(
         root: projectURL.appendingPathComponent(".agents/skills", isDirectory: true),
         scope: .project,
-        providers: [.claude, .codex]
+        providers: Set(SessionProviderKind.allCases)
       )
     ]
 
@@ -361,6 +371,16 @@ public actor ProjectDetailsInventoryService: ProjectDetailsInventoryServiceProto
       for entry in codexEntries(fromTOML: content) { add(entry) }
     }
 
+    // Antigravity: ~/.gemini/config/mcp_config.json (same `mcpServers` shape as Claude).
+    let antigravityConfigURL = homeDirectory.appendingPathComponent(".gemini/config/mcp_config.json", isDirectory: false)
+    if let data = try? Data(contentsOf: antigravityConfigURL),
+       let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let servers = root["mcpServers"] as? [String: Any] {
+      for entry in claudeEntries(servers, scope: .personal) {
+        add(ProjectMCPServerEntry(name: entry.name, detail: entry.detail, scope: entry.scope, providers: [.antigravity]))
+      }
+    }
+
     return merged.values.sorted {
       $0.name == $1.name ? $0.scope.rawValue < $1.scope.rawValue : $0.name < $1.name
     }
@@ -518,7 +538,17 @@ public actor ProjectDetailsInventoryService: ProjectDetailsInventoryServiceProto
     addFile(
       projectURL.appendingPathComponent("AGENTS.md", isDirectory: false),
       scope: .project,
-      providers: [.codex]
+      providers: [.codex, .antigravity]
+    )
+    addFile(
+      homeDirectory.appendingPathComponent(".gemini/GEMINI.md", isDirectory: false),
+      scope: .personal,
+      providers: [.antigravity]
+    )
+    addFile(
+      projectURL.appendingPathComponent("GEMINI.md", isDirectory: false),
+      scope: .project,
+      providers: [.antigravity]
     )
 
     // Codex prefix rules (~/.codex/rules/*.rules).

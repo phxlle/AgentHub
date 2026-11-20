@@ -1,6 +1,6 @@
 import Foundation
 
-/// Detects which agent CLIs (Claude Code, Codex) are installed on the system.
+/// Detects which agent CLIs (Claude Code, Codex, Antigravity) are installed on the system.
 public protocol AgentCLIDetecting: Sendable {
   func detectInstalledCLIs() async -> [DetectedAgentCLI]
 }
@@ -13,6 +13,7 @@ public struct AgentCLIDetector: AgentCLIDetecting {
   private static let candidateExecutables: [(provider: WorktreeLaunchProvider, names: [String])] = [
     (.claude, ["claude"]),
     (.codex, ["codex"]),
+    (.antigravity, ["agy"]),
   ]
 
   private let pathDirectories: [String]

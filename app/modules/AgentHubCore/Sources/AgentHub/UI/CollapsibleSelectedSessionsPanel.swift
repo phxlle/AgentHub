@@ -13,6 +13,7 @@ import SwiftUI
 public struct CollapsibleSelectedSessionsPanel: View {
   @Bindable var claudeViewModel: CLISessionsViewModel
   @Bindable var codexViewModel: CLISessionsViewModel
+  let antigravityViewModel: CLISessionsViewModel?
   @Binding var primarySessionId: String?
 
   @Environment(\.colorScheme) private var colorScheme
@@ -33,18 +34,22 @@ public struct CollapsibleSelectedSessionsPanel: View {
   public init(
     claudeViewModel: CLISessionsViewModel,
     codexViewModel: CLISessionsViewModel,
+    antigravityViewModel: CLISessionsViewModel? = nil,
     primarySessionId: Binding<String?>
   ) {
     self.claudeViewModel = claudeViewModel
     self.codexViewModel = codexViewModel
+    self.antigravityViewModel = antigravityViewModel
     self._primarySessionId = primarySessionId
   }
 
   private var monitoredCount: Int {
     claudeViewModel.monitoredSessions.count +
     codexViewModel.monitoredSessions.count +
+    (antigravityViewModel?.monitoredSessions.count ?? 0) +
     claudeViewModel.pendingHubSessions.count +
-    codexViewModel.pendingHubSessions.count
+    codexViewModel.pendingHubSessions.count +
+    (antigravityViewModel?.pendingHubSessions.count ?? 0)
   }
 
   public var body: some View {
@@ -130,6 +135,8 @@ public struct CollapsibleSelectedSessionsPanel: View {
               switch item.providerKind {
               case .claude: return claudeViewModel.pinnedSessionIds.contains(item.session.id)
               case .codex: return codexViewModel.pinnedSessionIds.contains(item.session.id)
+              case .antigravity:
+                return antigravityViewModel?.pinnedSessionIds.contains(item.session.id) ?? false
               }
             }(),
             onPin: {
@@ -137,6 +144,7 @@ public struct CollapsibleSelectedSessionsPanel: View {
                 switch item.providerKind {
                 case .claude: claudeViewModel.togglePin(for: item.session)
                 case .codex: codexViewModel.togglePin(for: item.session)
+                case .antigravity: antigravityViewModel?.togglePin(for: item.session)
                 }
               }
             },
@@ -144,6 +152,7 @@ public struct CollapsibleSelectedSessionsPanel: View {
               switch item.providerKind {
               case .claude: claudeViewModel.stopMonitoring(session: item.session)
               case .codex: codexViewModel.stopMonitoring(session: item.session)
+              case .antigravity: antigravityViewModel?.stopMonitoring(session: item.session)
               }
             },
             onSelect: {
@@ -220,6 +229,32 @@ public struct CollapsibleSelectedSessionsPanel: View {
       ))
     }
 
+    if let antigravityViewModel {
+      for pending in antigravityViewModel.pendingHubSessions {
+        results.append(SelectedSessionItem(
+          id: "pending-antigravity-\(pending.id.uuidString)",
+          session: pending.placeholderSession,
+          providerKind: .antigravity,
+          timestamp: pending.startedAt,
+          isPending: true,
+          sessionStatus: nil,
+          linkedPullRequests: []
+        ))
+      }
+
+      for item in antigravityViewModel.monitoredSessions {
+        results.append(SelectedSessionItem(
+          id: "antigravity-\(item.session.id)",
+          session: item.session,
+          providerKind: .antigravity,
+          timestamp: item.session.lastActivityAt,
+          isPending: false,
+          sessionStatus: item.state?.status,
+          linkedPullRequests: Self.pullRequestReferences(in: item.state?.detectedResourceLinks ?? [])
+        ))
+      }
+    }
+
     return results.sorted { $0.timestamp > $1.timestamp }
   }
 
@@ -229,6 +264,8 @@ public struct CollapsibleSelectedSessionsPanel: View {
       return claudeViewModel.sessionCustomNames[item.session.id]
     case .codex:
       return codexViewModel.sessionCustomNames[item.session.id]
+    case .antigravity:
+      return antigravityViewModel?.sessionCustomNames[item.session.id]
     }
   }
 
